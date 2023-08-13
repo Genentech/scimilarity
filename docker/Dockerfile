@@ -90,28 +90,9 @@ RUN pip3 install \
 	pegasuspy
 
 # Install SCimilarity API
-# TODO: git-clone from remote once setup
-#COPY scimilarity-src.tar.gz /scimilarity/scimilarity-src.tar.gz
-#RUN mkdir -p /scimilarity \
-#    && cd /scimilarity \
-#    && tar -zxf scimilarity-src.tar.gz \
-#    && rm scimilarity-src.tar.gz \
-#    && cd /scimilarity/scimilarity-external \
-#    && pip install .
-COPY scimilarity-0.0.post1.dev30+g5e68fe1.tar.gz /tmp/scimilarity.tar.gz
-RUN pip install /tmp/scimilarity.tar.gz \
-    && rm /tmp/scimilarity.tar.gz
-
-# Install SCimilarity models
-# TODO: wget from remote once setup
-# COPY model_2023_04_rep0.tar.gz /scimilarity/model_2023_04_rep0.tar.gz
-# RUN cd /scimilarity \
-#     && tar -zxf model_2023_04_rep0.tar.gz \
-#     && rm model_2023_04_rep0.tar.gz
+RUN git clone https://github.com/Genentech/scimilarity.git /tmp/scimilarity \
+    && cd /tmp/scimilarity \
+    && pip install .
 
 # Entry points
 CMD ["start-notebook"]
-
-# pip3 install jupyterlab
-# jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
-# jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir /scimilarity
