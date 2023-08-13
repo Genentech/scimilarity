@@ -21,12 +21,12 @@ jobs:
   # Build job
   build:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/genentech/scimilarity:latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
       - name: Install dependencies
         run: |
-          sudo apt-get install -y pandoc
           pip install -r docs/requirements.txt
       - name: Setup Pages
         id: pages
