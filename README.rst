@@ -11,7 +11,7 @@ quickly and systematically leverage massive public scRNA-seq atlases to learn
 about a cell state of interest.
 
 Tutorials and API documentation can be found at:
-https://genentech.github.io/scimilarity
+https://genentech.github.io/scimilarity/index.html
 
 Pretrained model weights, embeddings, kNN graphs, a single-cell metadata
 can be downloaded from:
