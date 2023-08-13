@@ -16,3 +16,6 @@ https://genentech.github.io/scimilarity
 Pretrained model weights, embeddings, kNN graphs, a single-cell metadata
 can be downloaded from:
 https://zenodo.org/record/8240464
+
+A docker container with SCimilarity preinstalled can be pulled from:
+https://ghcr.io/genentech/scimilarity

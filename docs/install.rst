@@ -43,7 +43,7 @@ be pulled via:
 
 ::
 
-    docker pull ghcr.io/genentech/scimilarity:0.1.0
+    docker pull ghcr.io/genentech/scimilarity:latest
 
 Models are not included in the Docker container and must be downloaded separately.
 
@@ -67,4 +67,4 @@ You can initiate a Jupyter Notebook session rooted in ``/workspace`` using the
         -v /path/to/workspace:/workspace \
         -v /path/to/data:/data \
         -v /path/to/models:/models \
-        scimilarity:0.1.0 start-notebook
+        ghcr.io/genentech/scimilarity:latest start-notebook
