@@ -1,6 +1,7 @@
 FROM fedora:38
 LABEL maintainer="Jason Anthony Vander Heiden [vandej27@gene.com]" \
-      description="SCimilarity"
+      org.opencontainers.image.description="SCimilarity" \
+      org.opencontainers.image.source="https://github.com/genentech/scimilarity"
 
 # Bind points
 VOLUME /data
