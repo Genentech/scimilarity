@@ -1,16 +1,15 @@
-from collections import Counter
-from typing import Optional
-
 import anndata
+from collections import Counter
 import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import scanpy
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from typing import Optional
 
-from scimilarity.ontologies import import_cell_ontology, get_id_mapper
 from scimilarity.utils import align_dataset
+from scimilarity.ontologies import import_cell_ontology, get_id_mapper
 
 
 class scDataset(Dataset):
@@ -31,7 +30,7 @@ class scDataset(Dataset):
 
 
 class MetricLearningDataModule(pl.LightningDataModule):
-    """A class to encapsulates the steps needed to model the data."""
+    """A class to encapsulate the anndata needed to train the model."""
 
     def __init__(
         self,
@@ -49,9 +48,9 @@ class MetricLearningDataModule(pl.LightningDataModule):
         ----------
         train_path: str
             Path to the training h5ad file.
-        val_path: str, optional
+        val_path: str, optional, default: None
             Path to the validataion h5ad file.
-        test_path: str, optional
+        test_path: str, optional, default: None
             Path to the test h5ad file.
         obs_field: str, default: "celltype_name"
             The obs key name containing celltype labels.
@@ -145,6 +144,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
             An object containing the data whose celltype labels have
             valid ontology id.
         """
+
         valid_terms_idx = data.obs[self.obs_field].isin(self.name2id.keys())
         if valid_terms_idx.any():
             return data[valid_terms_idx]
@@ -165,6 +165,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         tuple
             A tuple containing the X matrix, ontology ids, and study.
         """
+
         data = anndata.read_h5ad(filename)
         if n_obs:  # subset n_obs from data
             scanpy.pp.subsample(data, n_obs=n_obs)
@@ -181,7 +182,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
 
         return data.X, data.obs.label_int.values, data.obs.study
 
-    def two_way_weighting(self, vec1, vec2):
+    def two_way_weighting(self, vec1, vec2) -> dict:
         """Two-way weighting.
 
         Parameters
@@ -196,6 +197,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         dict
             A dictionary containing the two-way weighting.
         """
+
         counts = pd.crosstab(vec1, vec2)
         weights_matrix = (1 / counts).replace(np.inf, 0)
         return weights_matrix.unstack().to_dict()
@@ -213,6 +215,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         WeightedRandomSampler
             A WeightedRandomSampler object.
         """
+
         if dataset.study is None:
             class_sample_count = Counter(dataset.Y)
             sample_weights = torch.Tensor(
@@ -245,6 +248,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
             A Tuple[torch.Tensor, torch.Tensor, list] containing information
             on the collated tensors.
         """
+
         profiles, labels, studies = tuple(
             map(list, zip(*batch))
         )  # tuple([list(t) for t in zip(*batch)])
@@ -262,6 +266,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         DataLoader
             A DataLoader object containing the training dataset.
         """
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -280,6 +285,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         DataLoader
             A DataLoader object containing the validation dataset.
         """
+
         if self.val_dataset is None:
             return None
         return DataLoader(
@@ -300,6 +306,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         DataLoader
             A DataLoader object containing the test dataset.
         """
+
         if self.test_dataset is None:
             return None
         return DataLoader(

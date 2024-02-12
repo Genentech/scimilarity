@@ -1,17 +1,4 @@
-import json
-import os
 from typing import Optional, Tuple, Union
-
-import hnswlib
-import numpy as np
-import pandas as pd
-import torch
-import zarr
-from scipy.sparse import csr_matrix
-
-from scimilarity.b_colors import BColors
-from scimilarity.nn_models import Encoder
-from scimilarity.utils import align_dataset
 
 
 class CellEmbedding:
@@ -33,9 +20,9 @@ class CellEmbedding:
             Path to the directory containing model files.
         use_gpu: bool, default: False
             Use GPU instead of CPU.
-        parameters: dict, optional
+        parameters: dict, optional, default: None
             Use a dictionary of custom model parameters instead of infering from model files.
-        filenames: dict, optional
+        filenames: dict, optional, default: None
             Use a dictionary of custom filenames for model files instead default.
         residual: bool, default: False
             Use residual connections.
@@ -44,6 +31,11 @@ class CellEmbedding:
         --------
         >>> ce = CellEmbedding(model_path="/opt/data/model")
         """
+
+        import json
+        import os
+        import pandas as pd
+        from scimilarity.nn_models import Encoder
 
         self.model_path = model_path
         self.use_gpu = use_gpu
@@ -98,35 +90,18 @@ class CellEmbedding:
         )["0"].to_dict()
         self.label2int = {value: key for key, value in self.int2label.items()}
 
-    def load_knn_index(self, knn_file: str):
-        """Load the kNN index file
-
-        Parameters
-        ----------
-        knn_file: str
-            Filename of the kNN index.
-        """
-        if os.path.isfile(knn_file):
-            self.knn = hnswlib.Index(space="cosine", dim=self.model.latent_dim)
-            self.knn.load_index(knn_file)
-        else:
-            print(
-                f"{BColors.WARNING}Warning: No KNN index found at {knn_file}{BColors.ENDC}"
-            )
-            self.knn = None
-
     def get_embeddings(
         self,
-        X: Union[csr_matrix, np.ndarray],
+        X: Union["scipy.sparse.csr_matrix", "numpy.ndarray"],
         num_cells: int = -1,
         buffer_size: int = 10000,
-    ) -> np.ndarray:
+    ) -> "numpy.ndarray":
         """Calculate embeddings for lognormed gene expression matrix.
 
         Parameters
         ----------
         X: scipy.sparse.csr_matrix, numpy.ndarray
-            Gene expression matrix.
+            Gene space aligned and log normalized (tp10k) gene expression matrix.
         num_cells: int, default: -1
             The number of cells to embed, starting from index 0.
             A value of -1 will embed all cells.
@@ -140,10 +115,17 @@ class CellEmbedding:
 
         Examples
         --------
-        >>> from scimilarity.utils import align_dataset
+        >>> from scimilarity.utils import align_dataset, lognorm_counts
         >>> ce = CellEmbedding(model_path="/opt/data/model")
-        >>> embedding = ce.get_embeddings(align_dataset(data, ce.gene_order).X)
+        >>> data = align_dataset(data, ce.gene_order)
+        >>> data = lognorm_counts(data)
+        >>> embeddings = ce.get_embeddings(data.X)
         """
+
+        import numpy as np
+        from scipy.sparse import csr_matrix
+        import torch
+        import zarr
 
         if num_cells == -1:
             num_cells = X.shape[0]
@@ -194,9 +176,28 @@ class CellEmbedding:
 
         return embedding
 
+    def load_knn_index(self, knn_file: str):
+        """Load the kNN index file
+
+        Parameters
+        ----------
+        knn_file: str
+            Filename of the kNN index.
+        """
+
+        import hnswlib
+        import os
+
+        if os.path.isfile(knn_file):
+            self.knn = hnswlib.Index(space="cosine", dim=self.model.latent_dim)
+            self.knn.load_index(knn_file)
+        else:
+            print(f"Warning: No KNN index found at {knn_file}")
+            self.knn = None
+
     def get_nearest_neighbors(
-        self, embeddings: np.ndarray, k: int = 50, ef: int = 100
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        self, embeddings: "numpy.ndarray", k: int = 50, ef: int = 100
+    ) -> Tuple["numpy.ndarray", "numpy.ndarray"]:
         """Get nearest neighbors.
         Used by classes that inherit from CellEmbedding and have an instantiated kNN.
 

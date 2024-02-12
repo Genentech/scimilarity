@@ -20,5 +20,4 @@ from .cell_embedding import CellEmbedding
 from .cell_annotation import CellAnnotation
 from .cell_query import CellQuery
 from .interpreter import Interpreter
-from .utils import align_dataset
-from .zarr_dataset import ZarrDataset
+from .utils import align_dataset, lognorm_counts

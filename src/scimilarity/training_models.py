@@ -1,17 +1,16 @@
+from datetime import datetime
+import hnswlib
 import json
 import os
-from datetime import datetime
-from typing import List, Optional
-
-import hnswlib
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
 from torch import nn
+import torch.nn.functional as F
+from typing import Optional, List
 
 from scimilarity.triplet_selector import TripletSelector
-from scimilarity.nn_models import Decoder, Encoder
+from scimilarity.nn_models import Encoder, Decoder
 
 
 class TripletLoss(torch.nn.TripletMarginLoss):
@@ -215,8 +214,12 @@ class MetricLearning(pl.LightningModule):
 
         self.scheduler = None
 
+        self.val_step_outputs = []
+        self.test_step_outputs = []
+
     def configure_optimizers(self):
         """Configure optimizers."""
+
         optimizer = torch.optim.AdamW(self.parameters(), self.lr, weight_decay=self.l2)
         self.scheduler = {
             "scheduler": torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -231,34 +234,95 @@ class MetricLearning(pl.LightningModule):
         }  # pytorch-lightning required format
 
     def forward(self, x):
+        """Forward.
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            Input tensor corresponding to input layer.
+
+        Returns
+        -------
+        z: torch.Tensor
+            Output tensor corresponding to the last encoder layer.
+        x_hat: torch.Tensor
+            Output tensor corresponding to the last decoder layer.
+        """
+
         z = self.encoder(x)
         x_hat = self.decoder(z)
         return z, x_hat
 
     def get_losses(self, batch, use_studies: bool = True):
+        """Calculate the triplet and reconstruction loss.
+
+        Parameters
+        ----------
+        batch:
+            A batch as defined by a pytorch DataLoader.
+        use_studies: bool, default: True
+            Whether to use studies metadata in mining triplets and calculating triplet loss
+
+        Returns
+        -------
+        triplet_loss: torch.Tensor
+            Triplet loss.
+        reconstruction_loss: torch.Tensor
+            reconstruction loss
+        num_hard_triplets: torch.Tensor
+            Number of hard triplets.
+        num_viable_triplets: torch.Tensor
+            Number of viable triplets.
+        """
+
         cells, labels, studies = batch
         if not use_studies:
             studies = None
         embedding, reconstruction = self(cells)
-        triplet_losses, num_hard_triplets, num_viable_triplets = self.triplet_loss_fn(
+        triplet_loss, num_hard_triplets, num_viable_triplets = self.triplet_loss_fn(
             embedding, labels, self.trainer.datamodule.int2label, studies
         )
         reconstruction_loss = self.mse_loss_fn(cells, reconstruction)
         return (
-            triplet_losses,
+            triplet_loss,
             reconstruction_loss,
             num_hard_triplets,
             num_viable_triplets,
         )
 
-    def mixed_loss(self, triplet_loss, reconstruction_loss):
+    def get_mixed_loss(self, triplet_loss, reconstruction_loss):
+        """Calculate the mixed loss.
+
+        Parameters
+        ----------
+        triplet_loss: torch.Tensor
+            Triplet loss.
+        reconstruction_loss: torch.Tensor
+            reconstruction loss
+
+        Returns
+        -------
+        torch.Tensor
+            Mixed loss.
+        """
+
         if self.alpha == 0:
             return reconstruction_loss
         if self.alpha == 1:
             return triplet_loss
         return (self.alpha * triplet_loss) + ((1.0 - self.alpha) * reconstruction_loss)
 
-    def training_step(self, batch, batch_idx):  # pytorch-lightning required parameters
+    def training_step(self, batch, batch_idx):
+        """Pytorch-lightning training step.
+
+        Parameters
+        ----------
+        batch:
+            A batch as defined by a pytorch DataLoader.
+        batch_idx:
+            A batch index as defined by a pytorch-lightning.
+        """
+
         (
             triplet_losses,
             reconstruction_loss,
@@ -270,7 +334,7 @@ class MetricLearning(pl.LightningModule):
         num_nonzero_loss = (triplet_losses > 0).sum(dtype=torch.float).detach()
         hard_triplets = num_hard_triplets / num_viable_triplets
 
-        loss = self.mixed_loss(triplet_loss, reconstruction_loss)
+        loss = self.get_mixed_loss(triplet_loss, reconstruction_loss)
 
         current_lr = self.scheduler["scheduler"].get_last_lr()[0]
 
@@ -324,29 +388,76 @@ class MetricLearning(pl.LightningModule):
             "train_num_viable_triplets": num_viable_triplets,
         }
 
-    def validation_step(
-        self, batch, batch_idx, dataloader_idx: Optional[int] = None
-    ):  # pytorch-lightning required parameters
+    def on_validation_epoch_start(self):
+        """Pytorch-lightning validation epoch start."""
+        super().on_validation_epoch_start()
+        self.val_step_outputs = []
+
+    def validation_step(self, batch, batch_idx):
+        """Pytorch-lightning validation step.
+
+        Parameters
+        ----------
+        batch:
+            A batch as defined by a pytorch DataLoader.
+        batch_idx:
+            A batch index as defined by a pytorch-lightning.
+        """
+
         if self.trainer.datamodule.val_dataset is None:
             return {}
         return self._eval_step(batch, prefix="val")
 
-    def validation_epoch_end(self, step_outputs: list):
+    def on_validation_epoch_end(self):
+        """Pytorch-lightning validation epoch end evaluation."""
+
         if self.trainer.datamodule.val_dataset is None:
             return {}
-        return self._eval_epoch(step_outputs, prefix="val")
+        return self._eval_epoch(prefix="val")
 
-    def test_step(self, batch, batch_idx):  # pytorch-lightning required parameters
+    def on_test_epoch_start(self):
+        """Pytorch-lightning test epoch start."""
+        super().on_test_epoch_start()
+        self.test_step_outputs = []
+
+    def test_step(self, batch, batch_idx):
+        """Pytorch-lightning test step.
+
+        Parameters
+        ----------
+        batch:
+            A batch as defined by a pytorch DataLoader.
+        batch_idx:
+            A batch index as defined by a pytorch-lightning.
+        """
+
         if self.trainer.datamodule.test_dataset is None:
             return {}
         return self._eval_step(batch, prefix="test")
 
-    def test_epoch_end(self, step_outputs: list):
+    def on_test_epoch_end(self):
+        """Pytorch-lightning test epoch end evaluation."""
+
         if self.trainer.datamodule.test_dataset is None:
             return {}
-        return self._eval_epoch(step_outputs, prefix="test")
+        return self._eval_epoch(prefix="test")
 
     def _eval_step(self, batch, prefix: str):
+        """Evaluation of validation or test step.
+
+        Parameters
+        ----------
+        batch:
+            A batch as defined by a pytorch DataLoader.
+        prefix: str
+            A string prefix to label validation versus test evaluation.
+
+        Returns
+        -------
+        dict
+            A dictionary containing step evaluation metrics.
+        """
+
         (
             triplet_losses,
             reconstruction_loss,
@@ -358,7 +469,7 @@ class MetricLearning(pl.LightningModule):
         num_nonzero_loss = (triplet_losses > 0).sum()
         hard_triplets = num_hard_triplets / num_viable_triplets
 
-        loss = self.mixed_loss(triplet_loss, reconstruction_loss)
+        loss = self.get_mixed_loss(triplet_loss, reconstruction_loss)
 
         losses = {
             f"{prefix}_loss": loss,
@@ -369,9 +480,32 @@ class MetricLearning(pl.LightningModule):
             f"{prefix}_num_hard_triplets": num_hard_triplets,
             f"{prefix}_num_viable_triplets": num_viable_triplets,
         }
+
+        if prefix == "val":
+            self.val_step_outputs.append(losses)
+        elif prefix == "test":
+            self.test_step_outputs.append(losses)
         return losses
 
-    def _eval_epoch(self, step_outputs: list, prefix: str):
+    def _eval_epoch(self, prefix: str):
+        """Evaluation of validation or test epoch.
+
+        Parameters
+        ----------
+        prefix: str
+            A string prefix to label validation versus test evaluation.
+
+        Returns
+        -------
+        dict
+            A dictionary containing epoch evaluation metrics.
+        """
+
+        if prefix == "val":
+            step_outputs = self.val_step_outputs
+        elif prefix == "test":
+            step_outputs = self.test_step_outputs
+
         loss = torch.Tensor([step[f"{prefix}_loss"] for step in step_outputs]).mean()
         triplet_loss = torch.Tensor(
             [step[f"{prefix}_triplet_loss"] for step in step_outputs]
@@ -411,42 +545,9 @@ class MetricLearning(pl.LightningModule):
         }
         return losses
 
-    def get_dataset_embedding(self, dataset):
-        embedding_parts = []
-        labels_parts = []
-        study_parts = []
-
-        self.encoder.eval()
-        with torch.inference_mode():
-            buffer_size = 10000
-            for i in range(0, len(dataset), buffer_size):
-                profiles, labels_part, studies = dataset[i : i + buffer_size]
-                profiles = torch.Tensor(profiles).cuda()
-
-                embedding_parts.append(self.encoder(profiles).detach().cpu())
-                labels_parts.extend(labels_part)
-                study_parts.extend(studies.values)
-
-        return torch.vstack(embedding_parts), pd.Categorical(labels_parts), study_parts
-
-    def build_knn_classifier(
-        self, embeddings: torch.Tensor, ef_construction=1000, M=80
-    ):
-        n_cells, latent_dim = embeddings.shape
-        nn_reference = hnswlib.Index(
-            space="cosine", dim=latent_dim
-        )  # possible options are l2, cosine, or ip
-        nn_reference.init_index(
-            max_elements=n_cells, ef_construction=ef_construction, M=M
-        )
-        nn_reference.set_ef(ef_construction)
-        nn_reference.add_items(embeddings, range(len(embeddings)))
-        return nn_reference
-
     def save_all(
         self,
         model_path: str,
-        save_knn: bool = False,
         ef_construction: int = 1000,
         M: int = 80,
     ):
@@ -506,15 +607,6 @@ class MetricLearning(pl.LightningModule):
         with open(os.path.join(model_path, "metadata.json"), "w") as f:
             f.write(json.dumps(meta_data))
 
-        if save_knn:  # build and save KNN model
-            embeddings, labels, _ = self.get_dataset_embedding(
-                self.trainer.datamodule.train_dataset
-            )
-            knn = self.build_knn_classifier(
-                embeddings, ef_construction=ef_construction, M=M
-            )
-            knn.save_index(os.path.join(model_path, "kNN"))
-
     def load_state(
         self,
         encoder_filename: str,
@@ -522,6 +614,20 @@ class MetricLearning(pl.LightningModule):
         use_gpu: bool = False,
         freeze: bool = False,
     ):
+        """Load model state.
+
+        Parameters
+        ----------
+        encoder_filename: str
+            Filename containing the encoder model state.
+        decoder_filename: str
+            Filename containing the decoder model state.
+        use_gpu: bool, default: False
+            Boolean indicating whether or not to use GPUs.
+        freeze: bool, default: False
+            Freeze all but bottleneck layer, used if pretraining the encoder.
+        """
+
         self.encoder.load_state(encoder_filename, use_gpu)
         self.decoder.load_state(decoder_filename, use_gpu)
 

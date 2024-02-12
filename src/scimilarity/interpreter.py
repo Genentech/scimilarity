@@ -1,35 +1,26 @@
+from torch import nn
 from typing import Optional, Union
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-import torch
-from captum.attr import IntegratedGradients
-from scipy.sparse import csr_matrix
 
-mpl.rcParams["pdf.fonttype"] = 42
-
-
-class SimpleDist(torch.nn.Module):
+class SimpleDist(nn.Module):
     """Calculates the distance between representations"""
 
-    def __init__(self, encoder: torch.nn.Module):
+    def __init__(self, encoder: "torch.nn.Module"):
         """Constructor.
 
-         Parameters
-         ----------
-         encoder: torch.nn.Module
-             The encoder pytorch object.
-         """
+        Parameters
+        ----------
+        encoder: torch.nn.Module
+            The encoder pytorch object.
+        """
+
         super().__init__()
         self.encoder = encoder
 
     def forward(
         self,
-        anchors: torch.Tensor,
-        negatives: torch.Tensor,
+        anchors: "torch.Tensor",
+        negatives: "torch.Tensor",
     ):
         """Forward.
 
@@ -45,6 +36,7 @@ class SimpleDist(torch.nn.Module):
         float
             Sum of squares distance for the encoded tensors.
         """
+
         f_anc = self.encoder(anchors)
         f_neg = self.encoder(negatives)
         return ((f_neg - f_anc) ** 2).sum(dim=1)
@@ -55,7 +47,7 @@ class Interpreter:
 
     def __init__(
         self,
-        encoder: torch.nn.Module,
+        encoder: "torch.nn.Module",
         gene_order: list,
     ):
         """Constructor.
@@ -71,15 +63,18 @@ class Interpreter:
         --------
         >>> interpreter = Interpreter(CellEmbedding("/opt/data/model").model)
         """
+
+        from captum.attr import IntegratedGradients
+
         self.encoder = encoder
         self.dist_ig = IntegratedGradients(SimpleDist(self.encoder))
         self.gene_order = gene_order
 
     def get_attributions(
         self,
-        anchors: Union[torch.Tensor, np.ndarray, csr_matrix],
-        negatives: Union[torch.Tensor, np.ndarray, csr_matrix],
-    ) -> np.ndarray:
+        anchors: Union["torch.Tensor", "numpy.ndarray", "scipy.sparse.csr_matrix"],
+        negatives: Union["torch.Tensor", "numpy.ndarray", "scipy.sparse.csr_matrix"],
+    ) -> "numpy.ndarray":
         """Returns attributions, which can later be aggregated.
         High attributions for genes that are expressed more highly in the anchor
         and that affect the distance between anchors and negatives strongly.
@@ -100,6 +95,10 @@ class Interpreter:
         --------
         >>> attr = interpreter.get_attributions(anchors, negatives)
         """
+
+        import numpy as np
+        from scipy.sparse import csr_matrix
+        import torch
 
         assert anchors.shape == negatives.shape
 
@@ -135,7 +134,7 @@ class Interpreter:
             return attr.detach().cpu().numpy()
         return attr.detach().numpy()
 
-    def get_ranked_genes(self, attrs: np.ndarray) -> pd.DataFrame:
+    def get_ranked_genes(self, attrs: "numpy.ndarray") -> "pandas.DataFrame":
         """Get the ranked gene list based on highest attributions.
 
         Parameters
@@ -153,6 +152,9 @@ class Interpreter:
         >>> attrs_df = interpreter.get_ranked_genes(attrs)
         """
 
+        import numpy as np
+        import pandas as pd
+
         mean_attrs = attrs.mean(axis=0)
         idx = mean_attrs.argsort()[::-1]
         df = {
@@ -166,7 +168,7 @@ class Interpreter:
 
     def plot_ranked_genes(
         self,
-        attrs_df: pd.DataFrame,
+        attrs_df: "pandas.DataFrame",
         n_plot: int = 15,
         filename: Optional[str] = None,
     ):
@@ -186,13 +188,29 @@ class Interpreter:
         >>> interpreter.plot_ranked_genes(attrs_df)
         """
 
+        import matplotlib.pyplot as plt
+        import matplotlib as mpl
+        import numpy as np
+        import seaborn as sns
+
+        mpl.rcParams["pdf.fonttype"] = 42
+
         df = attrs_df.head(n_plot)
         ci = 1.96 * df["attribution_std"] / np.sqrt(df["cells"])
 
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(5, 3), dpi=200)
-        ax = sns.barplot(data=df, x="gene", y="attribution", yerr=ci, ax=ax)
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(5, 2), dpi=200)
+        sns.barplot(ax=ax, data=df, x="gene", y="attribution", hue="gene", dodge=False)
         ax.set_yticks([])
         plt.tick_params(axis="x", which="major", labelsize=8, labelrotation=90)
+
+        ax.errorbar(
+            df["gene"].values,
+            df["attribution"].values,
+            yerr=ci,
+            ecolor="black",
+            fmt="none",
+        )
+        ax.get_legend().remove()
 
         if filename:  # save the figure
             fig.savefig(filename, bbox_inches="tight")

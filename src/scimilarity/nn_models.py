@@ -3,15 +3,15 @@ This file contains the neural network architectures.
 These are all you need for inference.
 """
 
-from typing import List
-
 import torch
-import torch.nn.functional as F
 from torch import nn
+import torch.nn.functional as F
+from typing import List
 
 
 class Encoder(nn.Module):
     """A class that encapsulates the encoder."""
+
     def __init__(
         self,
         n_genes: int,
@@ -40,6 +40,7 @@ class Encoder(nn.Module):
         residual: bool, default: False
             Use residual connections.
         """
+
         super().__init__()
         self.latent_dim = latent_dim
         self.network = nn.ModuleList()
@@ -68,7 +69,20 @@ class Encoder(nn.Module):
         # output layer
         self.network.append(nn.Linear(hidden_dim[-1], latent_dim))
 
-    def forward(self, x) -> F.Tensor:
+    def forward(self, x) -> torch.Tensor:
+        """Forward.
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            Input tensor corresponding to input layer.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor corresponding to output layer.
+        """
+
         for i, layer in enumerate(self.network):
             if self.residual and (0 < i < len(self.network) - 1):
                 x = layer(x) + x
@@ -77,13 +91,14 @@ class Encoder(nn.Module):
         return F.normalize(x, p=2, dim=1)
 
     def save_state(self, filename: str):
-        """Save state dictionary.
+        """Save model state.
 
         Parameters
         ----------
         filename: str
-            Filename to save the state dictionary.
+            Filename to save the model state.
         """
+
         torch.save({"state_dict": self.state_dict()}, filename)
 
     def load_state(self, filename: str, use_gpu: bool = False):
@@ -93,9 +108,10 @@ class Encoder(nn.Module):
         ----------
         filename: str
             Filename containing the model state.
-        use_gpu: bool
+        use_gpu: bool, default: False
             Boolean indicating whether or not to use GPUs.
         """
+
         if not use_gpu:
             ckpt = torch.load(filename, map_location=torch.device("cpu"))
         else:
@@ -131,6 +147,7 @@ class Decoder(nn.Module):
         residual: bool, default: False
             Use residual connections.
         """
+
         super().__init__()
         self.latent_dim = latent_dim
         self.network = nn.ModuleList()
@@ -158,7 +175,19 @@ class Decoder(nn.Module):
         # reconstruction layer
         self.network.append(nn.Linear(hidden_dim[-1], n_genes))
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
+        """Forward.
+
+        Parameters
+        ----------
+        x: torch.Tensor
+            Input tensor corresponding to input layer.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor corresponding to output layer.
+        """
         for i, layer in enumerate(self.network):
             if self.residual and (0 < i < len(self.network) - 1):
                 x = layer(x) + x
@@ -167,13 +196,14 @@ class Decoder(nn.Module):
         return x
 
     def save_state(self, filename: str):
-        """Save state dictionary.
+        """Save model state.
 
         Parameters
         ----------
         filename: str
-            Filename to save the state dictionary.
+            Filename to save the model state.
         """
+
         torch.save({"state_dict": self.state_dict()}, filename)
 
     def load_state(self, filename: str, use_gpu: bool = False):
@@ -183,9 +213,10 @@ class Decoder(nn.Module):
         ----------
         filename: str
             Filename containing the model state.
-        use_gpu: bool
-            Boolean indicating whether to use GPUs.
+        use_gpu: bool, default: False
+            Boolean indicating whether or not to use GPUs.
         """
+
         if not use_gpu:
             ckpt = torch.load(filename, map_location=torch.device("cpu"))
         else:

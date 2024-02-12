@@ -1,7 +1,6 @@
-import os
 from collections import Counter
-
 import numpy as np
+import os
 import pandas as pd
 import pytorch_lightning as pl
 import torch
@@ -13,7 +12,8 @@ from scimilarity.zarr_dataset import ZarrDataset
 
 
 class scDatasetFromList(Dataset):
-    """A class to encapsulation single cell datasets from list"""
+    """A class that represent a collection of single cell datasets in zarr format."""
+
     def __init__(self, data_list, obs_celltype="celltype_name", obs_study="study"):
         """Constructor.
 
@@ -26,6 +26,7 @@ class scDatasetFromList(Dataset):
         obs_study: str, default: "study"
             Study name.
         """
+
         self.data_list = data_list
         self.ncells_list = [data.shape[0] for data in data_list]
         self.ncells = sum(self.ncells_list)
@@ -54,7 +55,8 @@ class scDatasetFromList(Dataset):
 
 
 class MetricLearningZarrDataModule(pl.LightningDataModule):
-    """A class to encapsulate zarr data model."""
+    """A class to encapsulate a collection of zarr datasets to train the model."""
+
     def __init__(
         self,
         train_path: str,
@@ -71,14 +73,16 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         ----------
         train_path: str
             Path to folder containing all training datasets.
+            All datasets should be in zarr format, aligned to a known gene space, and
+            cleaned to only contain valid cell ontology terms.
         gene_order: str
             Use a given gene order as described in the specified file. One gene
             symbol per line.
             IMPORTANT: the zarr datasets should already be in this gene order
             after preprocessing.
-        val_path: str, optional
+        val_path: str, optional, default: None
             Path to folder containing all validation datasets.
-        test_path: str, optional
+        test_path: str, optional, default: None
             Path to folder containing all test datasets.
         obs_field: str, default: "celltype_name"
             The obs key name containing celltype labels.
@@ -114,11 +118,23 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         train_data_list = []
         self.train_Y = []  # text labels
         self.train_study = []  # text studies
+
+        if self.train_path[-1] != os.sep:
+            self.train_path += os.sep
+
         self.train_file_list = [
-            f for f in os.listdir(self.train_path) if f.endswith(".aligned.zarr")
+            (
+                root.replace(self.train_path, "").split(os.sep)[0],
+                dirs[0].replace(".aligned.zarr", ""),
+            )
+            for root, dirs, files in os.walk(self.train_path)
+            if dirs and dirs[0].endswith(".aligned.zarr")
         ]
-        for filename in tqdm(self.train_file_list):
-            data_path = os.path.join(self.train_path, filename)
+
+        for study, sample in tqdm(self.train_file_list):
+            data_path = os.path.join(
+                self.train_path, study, sample, sample + ".aligned.zarr"
+            )
             if os.path.isdir(data_path):
                 zarr_data = ZarrDataset(data_path)
                 train_data_list.append(zarr_data)
@@ -137,11 +153,23 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             val_data_list = []
             self.val_Y = []
             self.val_study = []
+
+            if self.val_path[-1] != os.sep:
+                self.val_path += os.sep
+
             self.val_file_list = [
-                f for f in os.listdir(self.val_path) if f.endswith(".aligned.zarr")
+                (
+                    root.replace(self.val_path, "").split(os.sep)[0],
+                    dirs[0].replace(".aligned.zarr", ""),
+                )
+                for root, dirs, files in os.walk(self.val_path)
+                if dirs and dirs[0].endswith(".aligned.zarr")
             ]
-            for filename in tqdm(self.val_file_list):
-                data_path = os.path.join(self.val_path, filename)
+
+            for study, sample in tqdm(self.val_file_list):
+                data_path = os.path.join(
+                    self.val_path, study, sample, sample + ".aligned.zarr"
+                )
                 if os.path.isdir(data_path):
                     zarr_data = ZarrDataset(data_path)
                     val_data_list.append(zarr_data)
@@ -158,11 +186,23 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             test_data_list = []
             self.test_Y = []
             self.test_study = []
+
+            if self.test_path[-1] != os.sep:
+                self.test_path += os.sep
+
             self.test_file_list = [
-                f for f in os.listdir(self.test_path) if f.endswith(".aligned.zarr")
+                (
+                    root.replace(self.test_path, "").split(os.sep)[0],
+                    dirs[0].replace(".aligned.zarr", ""),
+                )
+                for root, dirs, files in os.walk(self.test_path)
+                if dirs and dirs[0].endswith(".aligned.zarr")
             ]
-            for filename in tqdm(self.test_file_list):
-                data_path = os.path.join(self.test_path, filename)
+
+            for study, sample in tqdm(self.test_file_list):
+                data_path = os.path.join(
+                    self.test_path, study, sample, sample + ".aligned.zarr"
+                )
                 if os.path.isdir(data_path):
                     zarr_data = ZarrDataset(data_path)
                     test_data_list.append(zarr_data)
@@ -176,12 +216,42 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             # Lazy load test data from list of zarr datasets
             self.test_dataset = scDatasetFromList(test_data_list)
 
-    def two_way_weighting(self, vec1: list, vec2: list):
+    def two_way_weighting(self, vec1: list, vec2: list) -> dict:
+        """Two-way weighting.
+
+        Parameters
+        ----------
+        vec1
+            Vector 1
+        vec2
+            Vector 2
+
+        Returns
+        -------
+        dict
+            A dictionary containing the two-way weighting.
+        """
+
         counts = pd.crosstab(vec1, vec2)
         weights_matrix = (1 / counts).replace(np.inf, 0)
         return weights_matrix.unstack().to_dict()
 
-    def get_sampler_weights(self, labels: list, studies: Optional[list] = None):
+    def get_sampler_weights(
+        self, labels: list, studies: Optional[list] = None
+    ) -> WeightedRandomSampler:
+        """Get weighted random sampler.
+
+        Parameters
+        ----------
+        dataset: scDataset
+            Single cell dataset.
+
+        Returns
+        -------
+        WeightedRandomSampler
+            A WeightedRandomSampler object.
+        """
+
         if studies is None:
             class_sample_count = Counter(labels)
             sample_weights = torch.Tensor([1.0 / class_sample_count[t] for t in labels])
@@ -199,6 +269,20 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         return WeightedRandomSampler(sample_weights, len(sample_weights))
 
     def collate(self, batch):
+        """Collate tensors.
+
+        Parameters
+        ----------
+        batch:
+            Batch to collate.
+
+        Returns
+        -------
+        tuple
+            A Tuple[torch.Tensor, torch.Tensor, list] containing information
+            on the collated tensors.
+        """
+
         profiles, labels, studies = tuple(
             map(list, zip(*batch))
         )  # tuple([list(t) for t in zip(*batch)])
@@ -208,7 +292,15 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             studies,
         )
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """Load the training dataset.
+
+        Returns
+        -------
+        DataLoader
+            A DataLoader object containing the training dataset.
+        """
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -219,7 +311,15 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             collate_fn=self.collate,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """Load the validation dataset.
+
+        Returns
+        -------
+        DataLoader
+            A DataLoader object containing the validation dataset.
+        """
+
         if self.val_dataset is None:
             return None
         return DataLoader(
@@ -232,7 +332,15 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             collate_fn=self.collate,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
+        """Load the test dataset.
+
+        Returns
+        -------
+        DataLoader
+            A DataLoader object containing the test dataset.
+        """
+
         if self.test_dataset is None:
             return None
         return DataLoader(

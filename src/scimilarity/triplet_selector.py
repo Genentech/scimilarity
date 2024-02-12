@@ -1,23 +1,20 @@
 from itertools import combinations
-from typing import Optional, Union
-
 import numpy as np
 import random
 import torch
+from typing import Union, Optional
 
 from scimilarity.ontologies import (
     import_cell_ontology,
+    get_id_mapper,
     get_all_ancestors,
     get_all_descendants,
-    get_id_mapper,
     get_parents,
 )
 
 
 class TripletSelector:
-    """
-    For each anchor-positive pair, mine negative samples to create a triplet.
-    """
+    """For each anchor-positive pair, mine negative samples to create a triplet."""
 
     def __init__(
         self,
@@ -26,6 +23,28 @@ class TripletSelector:
         perturb_labels: bool = False,
         perturb_labels_fraction: float = 0.5,
     ):
+        """Constructor.
+
+        Parameters
+        ----------
+        margin: float
+            Triplet loss margin.
+        negative_selection: str
+            Method for negative selection: {"semihard", "hardest", "random"}
+        perturb_labels: bool, default: False
+            Whether to perturb the ontology labels by coarse graining one level up.
+        perturb_labels_fraction: float, default: 0.5
+            The fraction of labels to perturb
+
+        Examples
+        --------
+        >>> triplet_selector = TripletSelector(margin=0.05,
+                negative_selection="semihard",
+                perturb_labels=True,
+                perturb_labels_fraction=0.5,
+            )
+        """
+
         self.margin = margin
         self.negative_selection = negative_selection
 
@@ -43,6 +62,30 @@ class TripletSelector:
         int2label: dict,
         studies: Optional[Union[np.ndarray, torch.Tensor, list]] = None,
     ):
+        """Get triplets as anchor, positive, and negative cell indices.
+
+        Parameters
+        ----------
+        embeddings: numpy.ndarray, torch.Tensor
+            Cell embeddings.
+        labels: numpy.ndarray, torch.Tensor
+            Cell labels in integer form.
+        int2label: dict
+            Dictionary to map labels in integer form to string
+        studies: numpy.ndarray, torch.Tensor, optional, default: None
+            Studies metadata for each cell.
+
+        Returns
+        -------
+        triplets: Tuple[List, List, List]
+            A tuple of lists containing anchor, positive, and negative cell indices.
+        num_hard_triplets: int
+            Number of hard triplets.
+        num_viable_triplets: int
+            Number of viable triplets.
+        )
+        """
+
         if isinstance(embeddings, torch.Tensor):
             distance_matrix = self.pdist(embeddings.detach().cpu().numpy())
         else:
@@ -91,8 +134,8 @@ class TripletSelector:
                         break  # label perturbed, skip the rest of the ancestors
 
         triplets = []
-        total_hard_triplets = 0
-        total_viable_triplets = 0
+        num_hard_triplets = 0
+        num_viable_triplets = 0
         for label in labels_set:
             term_id = self.name2id[int2label[label]]
             ancestors = get_all_ancestors(self.onto, term_id)
@@ -126,8 +169,8 @@ class TripletSelector:
                     - distance_matrix[[anchor_positive[0]], negative_indices]
                     + self.margin
                 )
-                total_hard_triplets += (loss_values > 0).sum()
-                total_viable_triplets += loss_values.size
+                num_hard_triplets += (loss_values > 0).sum()
+                num_viable_triplets += loss_values.size
 
                 # select one negative for anchor positive pair based on selection function
                 if self.negative_selection == "semihard":
@@ -158,8 +201,8 @@ class TripletSelector:
                 positive_idx,
                 negative_idx,
             ),
-            total_hard_triplets,
-            total_viable_triplets,
+            num_hard_triplets,
+            num_viable_triplets,
         )
 
     def get_triplets(
@@ -169,10 +212,33 @@ class TripletSelector:
         int2label: dict,
         studies: Optional[Union[np.ndarray, torch.Tensor, list]] = None,
     ):
+        """Get triplets as anchor, positive, and negative cell embeddings.
+
+        Parameters
+        ----------
+        embeddings: numpy.ndarray, torch.Tensor
+            Cell embeddings.
+        labels: numpy.ndarray, torch.Tensor
+            Cell labels in integer form.
+        int2label: dict
+            Dictionary to map labels in integer form to string
+        studies: numpy.ndarray, torch.Tensor, optional, default: None
+            Studies metadata for each cell.
+
+        Returns
+        -------
+        triplets: Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+            A tuple of numpy arrays containing anchor, positive, and negative cell embeddings.
+        num_hard_triplets: int
+            Number of hard triplets.
+        num_viable_triplets: int
+            Number of viable triplets.
+        """
+
         (
             triplets_idx,
-            total_hard_triplets,
-            total_viable_triplets,
+            num_hard_triplets,
+            num_viable_triplets,
         ) = self.get_triplets_idx(embeddings, labels, int2label, studies)
         anchor_idx, positive_idx, negative_idx = triplets_idx
         return (
@@ -181,11 +247,24 @@ class TripletSelector:
                 embeddings[positive_idx],
                 embeddings[negative_idx],
             ),
-            total_hard_triplets,
-            total_viable_triplets,
+            num_hard_triplets,
+            num_viable_triplets,
         )
 
-    def pdist(self, vectors):
+    def pdist(self, vectors: np.ndarray):
+        """Get pair-wise distance between all cell embeddings.
+
+        Parameters
+        ----------
+        vectors: numpy.ndarray
+            Cell embeddings.
+
+        Returns
+        -------
+        numpy.ndarray
+            Distance matrix of cell embeddings.
+        """
+
         vectors_squared_sum = (vectors**2).sum(axis=1)
         distance_matrix = (
             -2 * np.matmul(vectors, np.matrix.transpose(vectors))
@@ -195,14 +274,53 @@ class TripletSelector:
         return distance_matrix
 
     def hardest_negative(self, loss_values):
+        """Get hardest negative.
+
+        Parameters
+        ----------
+        loss_values: numpy.ndarray
+            Triplet loss of all negatives for given anchor positive pair.
+
+        Returns
+        -------
+        int
+            Index of selection.
+        """
+
         hard_negative = np.argmax(loss_values)
         return hard_negative if loss_values[hard_negative] > 0 else None
 
     def random_negative(self, loss_values):
+        """Get random negative.
+
+        Parameters
+        ----------
+        loss_values: numpy.ndarray
+            Triplet loss of all negatives for given anchor positive pair.
+
+        Returns
+        -------
+        int
+            Index of selection.
+        """
+
         hard_negatives = np.where(loss_values > 0)[0]
         return np.random.choice(hard_negatives) if len(hard_negatives) > 0 else None
 
     def semihard_negative(self, loss_values):
+        """Get a random semihard negative.
+
+        Parameters
+        ----------
+        loss_values: numpy.ndarray
+            Triplet loss of all negatives for given anchor positive pair.
+
+        Returns
+        -------
+        int
+            Index of selection.
+        """
+
         semihard_negatives = np.where(
             np.logical_and(loss_values < self.margin, loss_values > 0)
         )[0]

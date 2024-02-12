@@ -1,79 +1,208 @@
-from typing import Optional, Tuple, Union
-
-import anndata
-import numpy as np
-import pandas as pd
-import pegasusio as pgio
-import scanpy as sc
-from numba import njit
-from scipy.sparse import csr_matrix
+from typing import Optional, Union, Tuple, List
 
 
-def check_dataset(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    target_gene_order: np.ndarray,
-    gene_overlap_threshold: int = 10000,
-):
-    """Check dataset to see if it able to be processed.
+def get_pseudobulk_values(
+    data: "anndata.AnnData",
+) -> ["numpy.ndarray", "numpy.ndarray", "numpy.ndarray"]:
+    """Get pseudobulk values from AnnData as numpy arrays.
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
-    target_gene_order: numpy.ndarray
-        An array containing the gene space.
-    gene_overlap_threshold: int, default: 10000
-        The minimum number of genes in common between data and target_gene_order to be valid.
+
+    Returns
+    -------
+    counts: numpy.ndarray
+        1 x n_genes numpy array of sum of values in layer "counts".
+    detection: numpy.ndarray
+        1 x n_genes numpy array of mean detection values based on layer "counts".
 
     Examples
     --------
-    >>> ca = CellAnnotation(model_path="/opt/data/model")
-    >>> check_dataset(data, ca.gene_order, gene_overlap_threshold=10000)
+    >>> counts, detection = get_pseudobulk_values(data)
     """
 
-    if type(data) not in [anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData]:
-        raise ValueError(f"Unknown data type {type(data)}.")
+    import numpy as np
 
-    # check gene overlap
-    n_genes = sum(data.var.index.isin(target_gene_order))
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
-    if n_genes < gene_overlap_threshold:
-        raise RuntimeError(
-            f"Dataset incompatible: gene overlap less than {gene_overlap_threshold}"
+    counts = np.array(data.layers["counts"].sum(axis=0)).reshape(-1, data.shape[1])
+
+    detection = data.layers["counts"].copy()
+    detection[detection > 0] = 1.0
+    detection[detection < 0] = 0.0
+    detection = np.array(detection.mean(axis=0)).reshape(-1, data.shape[1])
+
+    return counts, detection
+
+
+def pseudobulk_anndata(
+    data: "anndata.AnnData",
+    pseudobulk_label: str,
+    groupby_labels: Optional[list] = None,
+    qc_filters: Optional[dict] = None,
+    min_num_cells: int = 1,
+    only_orig_genes: bool = False,
+):
+    """Pseudobulk an AnnData and return a new AnnData.
+
+    Parameters
+    ----------
+    data: anndata.AnnData
+        Annotated data matrix with rows for cells and columns for genes.
+    pseudobulk_label: str
+        Column label for basis of pseudobulk, typically the celltype name column.
+    groupby_labels: list, optional, default: None
+        Optional list of labels to groupby prior to pseudobulking based on pseudobulk_label.
+        We will always add pseudobulk_label into groupby_labels if it does not exist.
+        For example: ["sample", "tissue", "disease", "celltype_name"]
+        will groupby these columns and perform pseudobulking based on these groups.
+    qc_filters: dict, optional, default: None
+        Dictionary containing cell filters to perform prior to pseudobulking:
+            "mito_percent": max percent of reads in mitochondrial genes
+            "min_counts": min read count for cell
+            "min_genes": min number of genes with reads for cell
+            "max_nn_dist": max nearest neighbor distance to a reference label for predicted labels.
+    min_num_cells: int, default: 1
+        The minimum number of cells in a pseudobulk in order to be considered.
+    only_orig_genes: bool, default: False
+        Account for an aligned gene space and mask non original genes to the dataset with NaN as
+        their pseudobulk. Assumes the original gene list is in data.uns["orig_genes"].
+
+    Examples
+    --------
+    >>> pseudobulk_label = "celltype_name"
+    >>> groupby_labels = ["sample", "tissue_raw", pseudobulk_label]
+    >>> qc_filters = {"mito_percent": 20.0, "min_counts": 1000, "min_genes": 500, "max_nn_dist": 0.03, "max_nn_dist_col": "min_dist"}
+    >>> pseudobulk = pseudobulk_anndata(data, pseudobulk_label, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
+    """
+
+    import anndata
+    from collections import Counter
+    import numpy as np
+    import pandas as pd
+    import scanpy as sc
+    from scipy.sparse import csr_matrix
+
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+
+    if qc_filters is not None:
+        # determine prefix for mitochondrial genes
+        mito_prefix = "MT-"
+        if any(data.var.index.str.startswith("mt-")) is True:
+            mito_prefix = "mt-"
+
+        mito_percent = qc_filters.get("mito_percent", 100.0)
+        min_counts = qc_filters.get("min_counts", None)
+        min_genes = qc_filters.get("min_genes", None)
+        max_nn_dist = qc_filters.get("max_nn_dist", 0.03)
+        max_nn_dist_col = qc_filters.get("max_nn_dist_col", "nn_dist")
+
+        data = data.copy()
+        data.var["mt"] = data.var_names.str.startswith(mito_prefix)
+        sc.pp.calculate_qc_metrics(
+            data,
+            qc_vars=["mt"],
+            percent_top=None,
+            log1p=False,
+            inplace=True,
+            layer="counts",
         )
+        data = data[data.obs["pct_counts_mt"] <= mito_percent].copy()
+        if min_counts is not None:
+            data = data[data.obs["total_counts"] >= min_counts].copy()
+        if min_genes is not None:
+            data = data[data.obs["n_genes_by_counts"] >= min_genes].copy()
+        if max_nn_dist_col in data.obs.columns:
+            data = data[data.obs[max_nn_dist_col] <= max_nn_dist].copy()
 
-    # check if count matrix exists
-    counts_exist = False
-    if isinstance(data, pgio.MultimodalData):
-        data = data.get_data(data.list_data()[0])
-    if isinstance(data, pgio.UnimodalData):
-        counts_exist = "counts" in data.list_keys() or "raw.X" in data.list_keys()
-    if isinstance(data, anndata.AnnData):
-        counts_exist = "counts" in data.layers
+    counts_list = []
+    detection_list = []
+    obs_list = []
+    if groupby_labels is None:
+        classes = Counter(data.obs[pseudobulk_label])
+        for c in classes:
+            subset = data[data.obs[pseudobulk_label] == c]
+            counts, detection = get_pseudobulk_values(subset)
+            counts_list.append(counts)
+            detection_list.append(detection)
 
-    if not counts_exist:
-        raise RuntimeError("Dataset incompatible: no counts matrix found")
+            # construct the adata
+            meta = pd.DataFrame(
+                {pseudobulk_label: [c], "cells": [classes[c]]}
+            ).set_index(pseudobulk_label, drop=False)
+            meta.index = meta.index.astype(str)
+            obs_list.append(meta)
+    else:
+        if pseudobulk_label not in groupby_labels:
+            groupby_labels.append(pseudobulk_label)
+
+        # group by labels
+        df_sample = data.obs.groupby(groupby_labels, observed=True).size()
+        df_sample = df_sample[df_sample > 0].reset_index(name="cells")
+
+        # use groups to perform pseudobulk
+        for i, row in df_sample.iterrows():
+            num_cells = row["cells"]
+            row = row.drop("cells")
+            subset = data[(data.obs[list(row.index)] == row).all(axis=1)]
+            counts, detection = get_pseudobulk_values(subset)
+            counts_list.append(counts)
+            detection_list.append(detection)
+
+            # Construct the adata
+            meta = (
+                pd.DataFrame(row)
+                .transpose()
+                .astype("category")
+                .set_index(pseudobulk_label, drop=False)
+            )
+            meta["cells"] = num_cells
+            meta.index = meta.index.astype(str)
+            obs_list.append(meta)
+
+    if len(counts_list) == 0:
+        return None
+
+    counts = np.vstack(counts_list)
+    detection = np.vstack(detection_list)
+    adata = anndata.AnnData(
+        X=csr_matrix(counts.shape),
+        obs=pd.concat(obs_list),
+        var=pd.DataFrame(index=data.var.index),
+    )
+    adata.layers["counts"] = counts
+    adata.layers["detection"] = detection
+
+    if min_num_cells > 1:
+        adata = adata[adata.obs["cells"] >= min_num_cells].copy()
+    if only_orig_genes and "uns" in dir(data) and "orig_genes" in data.uns:
+        orig_genes = set(data.uns["orig_genes"])
+        not_orig_genes_idx = [
+            i for i, x in enumerate(data.var.index.tolist()) if x not in orig_genes
+        ]
+        adata[:, not_orig_genes_idx] = np.nan
+        adata.layers["counts"][:, not_orig_genes_idx] = np.nan
+        adata.layers["detection"][:, not_orig_genes_idx] = np.nan
+    return adata
 
 
 def lognorm_counts(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    clip_threshold: Optional[float] = None,
-    clip_threshold_percentile: Optional[float] = None,
-) -> Union[anndata.AnnData, pgio.UnimodalData]:
+    data: "anndata.AnnData",
+) -> "anndata.AnnData":
     """Log normalize the gene expression raw counts (per 10k).
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
-    clip_threshold: float, optional
-        Clip the data to the given max value.
-    clip_threshold_percentile: float, optional
-        Clip the data to the value at the given data percentile.
 
     Returns
     -------
-    pegasusio.UnimodalData, anndata.AnnData
+    anndata.AnnData
         A data object with normalized data that is ready to be used in further processes.
 
     Examples
@@ -81,54 +210,47 @@ def lognorm_counts(
     >>> data = lognorm_counts(data)
     """
 
-    if type(data) not in [anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData]:
-        raise ValueError(f"Unknown data type {type(data)}.")
+    import numpy as np
+    import scanpy as sc
 
-    return_unimodaldata = False
-    if isinstance(data, pgio.MultimodalData):
-        data = data.get_data(data.list_data()[0])
-    if isinstance(data, pgio.UnimodalData):
-        return_unimodaldata = True
-        data = data.to_anndata()
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
-    if "counts" not in data.layers and "raw.X" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found.")
-
-    if "raw.X" in data.layers:
-        data.layers["counts"] = data.layers["raw.X"].copy()
-        del data.layers["raw.X"]
     data.X = data.layers["counts"].copy()
 
-    # winsorize data
-    if clip_threshold_percentile:
-        clip_threshold = np.percentile(data.X.data, clip_threshold_percentile)
-    if clip_threshold:
-        data.X[data.X > clip_threshold] = clip_threshold
+    # check for nan in expression data, zero
+    if isinstance(data.X, np.ndarray) and np.isnan(data.X).any():
+        import warnings
+
+        warnings.warn(
+            "NANs detected in counts. NANs will be zeroed before normalization in X.",
+            UserWarning,
+        )
+        data.X = np.nan_to_num(data.X, nan=0.0)
 
     # log norm
     sc.pp.normalize_total(data, target_sum=1e4)
     sc.pp.log1p(data)
+    del data.uns["log1p"]
 
-    if return_unimodaldata:
-        data = pgio.UnimodalData(data)
     return data
 
 
 def filter_cells(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
+    data: "anndata.AnnData",
     min_genes: int = 400,
-    mito_prefix: str = None,
+    mito_prefix: Optional[str] = None,
     mito_percent: float = 30.0,
-) -> Union[anndata.AnnData, pgio.MultimodalData]:
-    """QC filter the dataset from gene expression raw counts.
+) -> "anndata.AnnData":
+    """QC filter cells in the dataset from gene expression raw counts.
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
     min_genes: int, default: 400
         The minimum number of expressed genes in order not to be filtered out.
-    mito_prefix: str, optional
+    mito_prefix: str, optional, default: None
         The prefix to represent mitochondria genes. Typically "MT-" or "mt-".
         If None, it will try to infer whether it is either "MT-" or "mt-".
     mito_percent: float, default: 30.0
@@ -136,7 +258,7 @@ def filter_cells(
 
     Returns
     -------
-    pegasusio.MultimodalData, anndata.AnnData
+    anndata.AnnData
         A data object with cells filtered out based on QC metrics that is ready to be used
         in further processes.
 
@@ -145,22 +267,10 @@ def filter_cells(
     >>> data = filter_cells(data)
     """
 
-    if type(data) not in [anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData]:
-        raise ValueError(f"Unknown data type {type(data)}.")
+    import scanpy as sc
 
-    return_unimodaldata = False
-    if isinstance(data, pgio.MultimodalData):
-        data = data.get_data(data.list_data()[0])
-    if isinstance(data, pgio.UnimodalData):
-        return_unimodaldata = True
-        data = data.to_anndata()
-
-    if "counts" not in data.layers and "raw.X" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found.")
-
-    if "raw.X" in data.layers:
-        data.layers["counts"] = data.layers["raw.X"].copy()
-        del data.layers["raw.X"]
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
     # determine between "MT-" and "mt-"
     if not mito_prefix:
@@ -182,169 +292,90 @@ def filter_cells(
     cell_subset, _ = sc.pp.filter_cells(data, min_genes=min_genes, inplace=False)
     data = data[cell_subset].copy()
 
-    if return_unimodaldata:
-        data = pgio.UnimodalData(data)
     return data
 
 
-def process_data(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    n_top_genes: int = 2000,
-    batch_key: Optional[str] = None,
-    resolution: float = 1.3,
-) -> Union[anndata.AnnData, pgio.UnimodalData]:
-    """Process the dataset: hvf selection, pca, umap, clustering
+def consolidate_duplicate_symbols(
+    data: "anndata.AnnData",
+) -> "anndata.AnnData":
+    """Consolidate duplicate gene symbols with sum.
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
-    n_top_genes: int, default: 2000
-        The number of highly variable genes to select.
-    batch_key: str, optional
-        The obs key which holds batch information for highly variable gene selection.
-    resolution: float, default: 1.3
-        The leiden clustering resolution.
 
     Returns
     -------
-    pegasusio.UnimodalData, anndata.AnnData
-        A data object where highly variable genes are in obs["highly_variable_features"],
-        pca data is in obsm["X_pca"], umap data is in obsm["X_umap"], and clustering
-        data is in obs["leiden_labels"].
+    anndata.AnnData
+        AnnData object with duplicate gene symbols consolidated.
 
     Examples
     --------
-    >>> data = filter_cells(data)
+    >>> data = consolidate_duplicate_symbols(data)
     """
 
-    return_unimodaldata = False
-    if isinstance(data, pgio.MultimodalData):
-        data = data.get_data(data.list_data()[0])
-    if isinstance(data, pgio.UnimodalData):
-        return_unimodaldata = True
-        data = data.to_anndata()
+    import anndata
+    from collections import Counter
+    import pandas as pd
+    from scipy.sparse import csr_matrix
 
-    # pca
-    sc.pp.highly_variable_genes(data, n_top_genes=n_top_genes, batch_key=batch_key)
-    sc.tl.pca(data)
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
-    # umap
-    sc.pp.neighbors(data, use_rep="X_pca")
-    sc.tl.umap(data)
+    gene_count = Counter(data.var.index.values)
+    dup_genes = {k for k in gene_count if gene_count[k] > 1}
+    if len(dup_genes) == 0:
+        return data
 
-    # clustering
-    sc.tl.leiden(data, resolution=resolution)
+    dup_genes_data = []
+    for k in dup_genes:
+        idx = [i for i, x in enumerate(data.var.index.values) if x == k]
+        X = csr_matrix(data.layers["counts"][:, idx].sum(axis=1))
+        gene_data = anndata.AnnData(
+            X=X,
+            var=pd.DataFrame(index=[k]),
+        )
+        gene_data.layers["counts"] = X.copy()
+        dup_genes_data.append(gene_data.copy())
+        del gene_data
 
-    if return_unimodaldata:
-        data = pgio.UnimodalData(data)
+    obs = data.obs.copy()
+    dup_genes_data = anndata.concat(dup_genes_data, axis=1)
+    dup_genes_data.obs = obs.reset_index(drop=True)
+    dup_genes_data.obs.index = dup_genes_data.obs.index.astype(str)
+
+    data.obs = obs.reset_index(drop=True)
+    data.obs.index = data.obs.index.astype(str)
+    data = anndata.concat(
+        [data[:, ~data.var.index.isin(dup_genes)].copy(), dup_genes_data], axis=1
+    )
+    data.obs = obs.copy()
     return data
-
-
-def switch_gene_symbols(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    var_key: str,
-) -> Union[anndata.AnnData, pgio.UnimodalData]:
-    """Switch to a different set of gene symbols, contained in data.var
-
-    Parameters
-    ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-    var_key: str
-        The var key which holds the symbol information.
-
-    Returns
-    -------
-    pegasusio.UnimodalData, anndata.AnnData
-        A data object where the var index is set to those in var_key, with
-        nulls and duplicates removed.
-
-    Examples
-    --------
-    >>> data = switch_gen_symbols(data, "symbol")
-    """
-    data.var = data.var.set_index(var_key, drop=False)
-    return data[:, ~(data.var.index.isnull() | data.var.index.duplicated())].copy()
-
-
-@njit(fastmath=True, cache=True)
-def select_csr(
-    data: np.ndarray,
-    indices: np.ndarray,
-    indptr: np.ndarray,
-    indexer: np.ndarray,
-    new_size: int,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Subset a scipy.sparse.csr_matrix based on index.
-
-    Parameters
-    ----------
-    data: numpy.ndarray
-        Data array of the matrix.
-    indices: numpy.ndarray
-        Index array of the matrix.
-    indptr: numpy.ndarray
-        Index pointer array of the matrix.
-    indexer: numpy.ndarray
-        The subset index array.
-    new_size: int
-        The size of the new matrix.
-
-    Returns
-    -------
-    numpy.ndarray
-        The new data array.
-    numpy.ndarray
-        The new index array.
-    numpy.ndarray
-        The new index pointer array.
-
-    Examples
-    --------
-    >>> data = filter_cells(data)
-    """
-
-    data_new = np.zeros_like(data[0:new_size])
-    indices_new = np.zeros_like(indices[0:new_size])
-    indptr_new = np.zeros_like(indptr)
-
-    cnt = 0
-    for i in range(indptr.size - 1):
-        indptr_new[i] = cnt
-        for j in range(indptr[i], indptr[i + 1]):
-            new_idx = indexer[indices[j]]
-            if new_idx >= 0:
-                data_new[cnt] = data[j]
-                indices_new[cnt] = new_idx
-                cnt += 1
-    indptr_new[indptr.size - 1] = cnt
-
-    return data_new, indices_new, indptr_new
 
 
 def align_dataset(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    target_gene_order: np.ndarray,
-    keep_obsm: bool = False,
+    data: "anndata.AnnData",
+    target_gene_order: list,
+    keep_obsm: bool = True,
     gene_overlap_threshold: int = 5000,
-) -> Union[anndata.AnnData, pgio.UnimodalData]:
+) -> "anndata.AnnData":
     """Align the gene space to the target gene order.
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
     target_gene_order: numpy.ndarray
         An array containing the gene space.
-    keep_obsm: bool, default: False
+    keep_obsm: bool, default: True
         Retain the original data's obsm matrices in output.
-    gene_overlap_threshold: int, default 5000
+    gene_overlap_threshold: int, default: 5000
         The minimum number of genes in common between data and target_gene_order to be valid.
 
     Returns
     -------
-    pegasusio.UnimodalData, anndata.AnnData
+    anndata.AnnData
         A data object with aligned gene space ready to be used for embedding cells.
 
     Examples
@@ -353,8 +384,10 @@ def align_dataset(
     >>> align_dataset(data, ca.gene_order)
     """
 
-    if isinstance(data, pgio.MultimodalData):
-        data = data.get_data(data.list_data()[0])
+    import anndata
+    import numpy as np
+    import pandas as pd
+    from scipy.sparse import csr_matrix
 
     # raise an error if not enough genes from target_gene_order exists
     if sum(data.var.index.isin(target_gene_order)) < gene_overlap_threshold:
@@ -370,69 +403,17 @@ def align_dataset(
     if data.var.index.values.tolist() == target_gene_order:
         return data
 
-    shell = None
-    if isinstance(data, pgio.UnimodalData):
-        mat = data.X
-        obs_field = data.obs
-        var_field = pd.DataFrame(index=target_gene_order)
-
-        indexer = var_field.index.get_indexer(data.var_names)
-        new_size = (indexer[mat.indices] >= 0).sum()
-        data_new, indices_new, indptr_new = select_csr(
-            mat.data, mat.indices, mat.indptr, indexer, new_size
-        )
-        data_matrix = csr_matrix(
-            (data_new, indices_new, indptr_new),
-            shape=(mat.shape[0], len(target_gene_order)),
-        )
-        data_matrix.sort_indices()
-
-        obs_field.index.name = "barcodekey"
-        var_field.index.name = "featurekey"
-        shell = pgio.UnimodalData(
-            barcode_metadata=obs_field,
-            feature_metadata=var_field,
-            matrices={"X": data_matrix},
-        )
-
-        if "counts" in data.list_keys():
-            mat = data.get_matrix("counts")
-            data_new, indices_new, indptr_new = select_csr(
-                mat.data, mat.indices, mat.indptr, indexer, new_size
-            )
-            shell.add_matrix(
-                "counts",
-                csr_matrix(
-                    (data_new, indices_new, indptr_new),
-                    shape=(mat.shape[0], len(target_gene_order)),
-                ),
-            )
-        if "raw.X" in data.list_keys():
-            mat = data.get_matrix("raw.X")
-            data_new, indices_new, indptr_new = select_csr(
-                mat.data, mat.indices, mat.indptr, indexer, new_size
-            )
-            shell.add_matrix(
-                "raw.X",
-                csr_matrix(
-                    (data_new, indices_new, indptr_new),
-                    shape=(mat.shape[0], len(target_gene_order)),
-                ),
-            )
-        if keep_obsm and hasattr(data, "obsm"):
-            shell.obsm = data.obsm
-
-    if isinstance(data, anndata.AnnData):
-        shell = anndata.AnnData(
-            X=csr_matrix((0, len(target_gene_order))),
-            var=pd.DataFrame(index=target_gene_order),
-            dtype=np.float32,
-        )
-        shell = anndata.concat(
-            (shell, data[:, data.var.index.isin(shell.var.index)]), join="outer"
-        )
-        if not keep_obsm and hasattr(data, "obsm"):
-            delattr(shell, "obsm")
+    orig_genes = data.var.index.values  # record original gene list before alignment
+    shell = anndata.AnnData(
+        X=csr_matrix((0, len(target_gene_order))),
+        var=pd.DataFrame(index=target_gene_order),
+    )
+    shell = anndata.concat(
+        (shell, data[:, data.var.index.isin(shell.var.index)]), join="outer"
+    )
+    shell.uns["orig_genes"] = orig_genes
+    if not keep_obsm and hasattr(data, "obsm"):
+        delattr(shell, "obsm")
 
     if data.var.shape[0] == 0:
         raise RuntimeError(f"Empty gene space detected.")
@@ -440,48 +421,94 @@ def align_dataset(
     return shell
 
 
-def get_centroid(sparse_counts_mat: csr_matrix) -> np.ndarray:
-    """Get the centroid for a raw counts matrix in scipy.sparse.csr_matrix format.
+def get_centroid(
+    counts: Union["scipy.sparse.csr_matrix", "numpy.ndarray"]
+) -> "numpy.ndarray":
+    """Get the centroid for a raw counts matrix.
 
     Parameters
     ----------
-    sparse_counts_mat: scipy.sparse.csr_matrix
-        Sparse matrix of raw gene expression counts.
+    counts: scipy.sparse.csr_matrix, numpy.ndarray
+        Raw gene expression counts.
 
     Returns
     -------
     numpy.ndarray
-        A 2D numpy array of the log normalized (1e4) centroid.
+        A 2D numpy array of the log normalized (1e4) for the centroid.
 
     Examples
     --------
     >>> centroid = get_centroid(data.get_matrix("counts"))
     >>> centroid = get_centroid(data.layers["counts"])
     """
-    summed_counts = sparse_counts_mat.sum(axis=0).A
-    normalization_factor = sparse_counts_mat.sum(axis=1).A.sum()
-    centroid = np.log(1 + 1e4 * summed_counts / normalization_factor)
+
+    import numpy as np
+    from scipy.sparse import csr_matrix
+
+    if isinstance(counts, np.ndarray):
+        counts = csr_matrix(counts)
+
+    sum_counts = counts.sum(axis=0).A
+    normalization_factor = counts.sum()
+    centroid = np.log(1 + 1e4 * sum_counts / normalization_factor)
+
     return centroid
 
 
+def get_dist2centroid(
+    centroid_embedding: "numpy.ndarray",
+    X: Union["scipy.sparse.csr_matrix", "numpy.ndarray"],
+) -> "numpy.ndarray":
+    """Get the centroid for a raw counts matrix in sparse csr_matrix format.
+
+    Parameters
+    ----------
+    centroid_embedding: numpy.ndarray
+        The embedding of the centroid.
+    X: scipy.sparse.csr_matrix, numpy.ndarray
+        The embedding of SCimilarity log normalized gene expression values or
+        SCimilarity log normalized gene expression values.
+    embed: bool, default: False
+        Whether to embed X.
+
+    Returns
+    -------
+    float
+        The mean distance of cells in X to the centroid embedding.
+
+    Examples
+    --------
+    >>> distances = cq.get_dist2centroid(centroid_embedding, X)
+    """
+
+    from scipy.spatial.distance import cdist
+    from scipy.sparse import csr_matrix
+
+    if isinstance(X, csr_matrix):
+        X = X.A
+    distances = cdist(centroid_embedding.reshape(1, -1), X, metric="cosine").flatten()
+
+    return distances
+
+
 def get_cluster_centroids(
-    data: Union[anndata.AnnData, pgio.UnimodalData, pgio.MultimodalData],
-    target_gene_order: np.ndarray,
+    data: "anndata.AnnData",
+    target_gene_order: "numpy.ndarray",
     cluster_key: str,
     cluster_label: Optional[str] = None,
     skip_null: bool = True,
-) -> Tuple[np.ndarray, list]:
+) -> Tuple["numpy.ndarray", list]:
     """Get centroids of clusters based on raw read counts.
 
     Parameters
     ----------
-    data: pegasusio.MultimodalData, pegasusio.UnimodalData, anndata.AnnData
+    data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
     target_gene_order: numpy.ndarray
         An array containing the gene space.
     cluster_key: str
-        The obs column key that contains cluster labels.
-    cluster_label: optional, str
+        The obs column name that contains cluster labels.
+    cluster_label: str, optional, default: None
         The cluster label of interest. If None, then get the centroids of
         all clusters, otherwise get only the centroid for the cluster
         of interest
@@ -490,15 +517,20 @@ def get_cluster_centroids(
 
     Returns
     -------
-    numpy.ndarray
+    centroids: numpy.ndarray
         A 2D numpy array of the log normalized (1e4) cluster centroids.
-    list
+    cluster_idx: list
         A list of cluster labels corresponding to the order returned in centroids.
 
     Examples
     --------
-    >>> centroids, cluster_idx = get_cluster_centroids(data, gene_order, "leiden_labels")
+    >>> centroids, cluster_idx = get_cluster_centroids(data, gene_order, "cluster_label")
     """
+
+    import numpy as np
+
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
     centroids = []
     cluster_idx = []
@@ -508,53 +540,19 @@ def get_cluster_centroids(
         aligned_data = aligned_data[aligned_data.obs[cluster_key].notnull()].copy()
     aligned_data.obs[cluster_key] = aligned_data.obs[cluster_key].astype(str)
 
-    if isinstance(aligned_data, pgio.UnimodalData):
-        for i in set(aligned_data.obs[cluster_key]):
-            if cluster_label is not None:
-                i = cluster_label
+    for i in set(aligned_data.obs[cluster_key]):
+        if cluster_label is not None:
+            i = cluster_label
 
-            cluster_idx.append(i)
-            if "counts" in aligned_data.list_keys():
-                centroids.append(
-                    get_centroid(
-                        aligned_data[aligned_data.obs[cluster_key] == i]
-                        .copy()
-                        .get_matrix("counts")
-                    )
-                )
-            elif "raw.X" in aligned_data.list_keys():
-                centroids.append(
-                    get_centroid(
-                        aligned_data[aligned_data.obs[cluster_key] == i]
-                        .copy()
-                        .get_matrix("raw.X")
-                    )
-                )
-            else:
-                raise RuntimeError("Dataset incompatible: no counts matrix found")
+        cluster_idx.append(i)
+        centroids.append(
+            get_centroid(
+                aligned_data[aligned_data.obs[cluster_key] == i].copy().layers["counts"]
+            )
+        )
 
-            if cluster_label is not None:
-                break
-
-    if isinstance(aligned_data, anndata.AnnData):
-        for i in set(aligned_data.obs[cluster_key]):
-            if cluster_label is not None:
-                i = cluster_label
-
-            cluster_idx.append(i)
-            if "counts" in aligned_data.layers:
-                centroids.append(
-                    get_centroid(
-                        aligned_data[aligned_data.obs[cluster_key] == i]
-                        .copy()
-                        .layers["counts"]
-                    )
-                )
-            else:
-                raise RuntimeError("Dataset incompatible: no counts matrix found")
-
-            if cluster_label is not None:
-                break
+        if cluster_label is not None:
+            break
 
     centroids = np.vstack(centroids)
 
@@ -562,3 +560,431 @@ def get_cluster_centroids(
         raise RuntimeError(f"NaN detected in centroids.")
 
     return centroids, cluster_idx
+
+
+def write_tiledb_array(
+    tiledb_array_uri: str, arr: "numpy.ndarray", batch_size: int = 100000
+):
+    """Write TileDB Array from a numpy array.
+
+    Parameters
+    ----------
+    tiledb_array_uri: str
+        URI for the TileDB array.
+    batch_size: int, default: 10000
+        Batch size for the tiles.
+    """
+
+    import numpy as np
+    import tiledb
+    from tqdm import tqdm
+
+    print(f"Configuring tiledb array: {tiledb_array_uri}")
+
+    xdimtype = np.int32
+    ydimtype = np.int32
+    value_type = np.float32
+
+    xdim = tiledb.Dim(
+        name="x", domain=(0, arr.shape[0] - 1), tile=batch_size, dtype=xdimtype
+    )
+    ydim = tiledb.Dim(
+        name="y", domain=(0, arr.shape[1] - 1), tile=arr.shape[1], dtype=ydimtype
+    )
+    dom = tiledb.Domain(xdim, ydim)
+
+    attr = tiledb.Attr(
+        name="vals",
+        dtype=value_type,
+        filters=tiledb.FilterList([tiledb.GzipFilter()]),
+    )
+
+    schema = tiledb.ArraySchema(
+        domain=dom,
+        sparse=False,
+        cell_order="row-major",
+        tile_order="row-major",
+        attrs=[attr],
+    )
+    tiledb.Array.create(tiledb_array_uri, schema)
+
+    tdbfile = tiledb.open(tiledb_array_uri, "w")
+    for row in tqdm(range(0, arr.shape[0], batch_size)):
+        mat_slice = slice(row, row + batch_size)
+        sub_matrix = np.array(
+            arr[mat_slice, :].astype(value_type).tolist(), dtype=value_type
+        )
+        tdbfile[mat_slice, 0 : arr.shape[1]] = sub_matrix
+    tdbfile.close()
+
+
+def create_tiledb_array(
+    tiledb_array_uri: str,
+    data_list: List[str],
+    nrows: int,
+    ncols: int,
+    batch_size: int = 10000,
+):
+    """Create TileDB Array from a list of numpy data files.
+
+    Parameters
+    ----------
+    tiledb_array_uri: str
+        URI for the TileDB array.
+    data_list: List[str]
+        List of data files.
+    nrows: int
+        Number of total rows
+    ncols: int
+        Number of columns, must be consistent between files
+    batch_size: int, default: 10000
+        Batch size for the tiles.
+    """
+
+    import numpy as np
+    import tiledb
+
+    print(f"Configuring tiledb array: {tiledb_array_uri}")
+
+    xdimtype = np.int32
+    ydimtype = np.int32
+    value_type = np.float32
+
+    xdim = tiledb.Dim(
+        name="x",
+        domain=(0, nrows - 1),
+        tile=batch_size,
+        dtype=xdimtype,
+    )
+    ydim = tiledb.Dim(
+        name="y",
+        domain=(0, ncols - 1),
+        tile=ncols,
+        dtype=ydimtype,
+    )
+    dom = tiledb.Domain(xdim, ydim)
+
+    attr = tiledb.Attr(
+        name="vals",
+        dtype=value_type,
+        filters=tiledb.FilterList([tiledb.GzipFilter()]),
+    )
+
+    schema = tiledb.ArraySchema(
+        domain=dom,
+        sparse=False,
+        cell_order="row-major",
+        tile_order="row-major",
+        attrs=[attr],
+    )
+    tiledb.Array.create(tiledb_array_uri, schema)
+
+    tdbfile = tiledb.open(tiledb_array_uri, "w")
+    previous_shape = None
+    for f in data_list:
+        if previous_shape is None:
+            paging_idx = 0
+        else:
+            paging_idx += previous_shape[0]
+
+        arr = np.load(f)
+        previous_shape = arr.shape
+
+        tbd_slice = slice(paging_idx, paging_idx + arr.shape[0])
+        tdbfile[tbd_slice, 0:ncols] = arr
+    tdbfile.close()
+
+
+def optimize_tiledb_array(tiledb_array_uri: str, verbose: bool = True):
+    """Optimize TileDB Array.
+
+    Parameters
+    ----------
+    tiledb_array_uri: str
+        URI for the TileDB array.
+    verbose: bool
+        Boolean indicating whether to use verbose printing.
+    """
+
+    import tiledb
+
+    if verbose:
+        print(f"Optimizing {tiledb_array_uri}")
+
+    frags = tiledb.array_fragments(tiledb_array_uri)
+    if verbose:
+        print("Fragments before consolidation: {}".format(len(frags)))
+
+    cfg = tiledb.Config()
+    cfg["sm.consolidation.step_min_frags"] = 1
+    cfg["sm.consolidation.step_max_frags"] = 200
+    tiledb.consolidate(tiledb_array_uri, config=cfg)
+    tiledb.vacuum(tiledb_array_uri)
+
+    frags = tiledb.array_fragments(tiledb_array_uri)
+    if verbose:
+        print("Fragments after consolidation: {}".format(len(frags)))
+
+
+def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
+    """Mapper to clean tissue names.
+
+    Parameters
+    ----------
+    tissues: pandas.Series
+        A pandas Series containing tissue names.
+
+    Returns
+    -------
+    pandas.Series
+        A pandas Series containing cleaned tissue names.
+
+    Examples
+    --------
+    >>> data.obs["tissue_simple"] = clean_tissues(data.obs["tissue"]).fillna("other tissue")
+    """
+
+    tissue_mapper = {
+        "adipose": {
+            "omentum",
+            "adipose tissue",
+            "Fat",
+            "omental fat pad",
+            "white adipose tissue",
+        },
+        "adrenal gland": {"adrenal gland", "visceral fat"},
+        "airway": {
+            "trachea",
+            "trachea;bronchus",
+            "Trachea",
+            "bronchus",
+            "nasopharynx",
+            "respiratory tract epithelium",
+            "bronchiole",
+            "inferior nasal concha",
+            "nose",
+            "nasal turbinal",
+        },
+        "bone": {"bone", "bone tissue", "head of femur", "synovial fluid"},
+        "bladder": {"urinary bladder", "Bladder", "bladder"},
+        "blood": {"blood", "umbilical cord blood", "peripheral blood", "Blood"},
+        "bone marrow": {"bone marrow", "Bone_Marrow"},
+        "brain": {
+            "brain",
+            "cortex",
+            "prefrontal cortex",
+            "occipital cortex",
+            "cerebrospinal fluid",
+            "midbrain",
+            "spinal cord",
+            "superior frontal gyrus",
+            "entorhinal cortex",
+            "White Matter brain tissue",
+            "Entorhinal Cortex",
+            "cerebral hemisphere",
+            "brain white matter",
+            "cerebellum",
+            "hypothalamus",
+        },
+        "breast": {"breast", "Mammary", "mammary gland"},
+        "esophagus": {
+            "esophagus",
+            "esophagusmucosa",
+            "esophagusmuscularis",
+            "esophagus mucosa",
+            "esophagus muscularis mucosa",
+        },
+        "eye": {"eye", "uvea", "corneal epithelium", "retina", "Eye"},
+        "stomach": {"stomach"},
+        "gut": {
+            "colon",
+            "ascending colon",
+            "sigmoid colon",
+            "large intestine",
+            "small intestine",
+            "intestine",
+            "Small_Intestine",
+            "Large_Intestine",
+            "ileum",
+            "right colon",
+            "left colon",
+            "transverse colon",
+            "digestive tract",
+            "caecum",
+            "jejunum",
+            "jejunum ",
+            "descending colon",
+        },
+        "heart": {
+            "heart",
+            "aorta",
+            "cardiac muscle of left ventricle",
+            "Heart",
+            "heart left ventricle",
+            "pulmonary artery",
+        },
+        "kidney": {
+            "adult mammalian kidney",
+            "kidney",
+            "Kidney",
+            "inner medulla of kidney",
+            "outer cortex of kidney",
+        },
+        "liver": {"liver", "Liver", "caudate lobe of liver"},
+        "lung": {
+            "lung",
+            "alveolar system",
+            "lung parenchyma",
+            "respiratory airway",
+            "trachea;respiratory airway",
+            "BAL",
+            "Lung",
+            "Parenchymal lung tissue",
+            "Distal",
+            "Proximal",
+            "Intermediate",
+            "lower lobe of lung",
+            "upper lobe of lung",
+        },
+        "lymph node": {
+            "lymph node",
+            "axillary lymph node",
+            "Lymph_Node",
+            "craniocervical lymph node",
+        },
+        "male reproduction": {
+            "male reproductive gland",
+            "testis",
+            "prostate gland",
+            "epididymis epithelium",
+            "Prostate",
+            "prostate",
+            "peripheral zone of prostate",
+        },
+        "female reproduction": {
+            "ovary",
+            "tertiary ovarian follicle",
+            "ovarian follicle",
+            "fimbria of uterine tube",
+            "ampulla of uterine tube",
+            "isthmus of fallopian tube",
+            "fallopian tube",
+            "uterus",
+            "Uterus",
+        },
+        "pancreas": {"pancreas", "Pancreas", "islet of Langerhans"},
+        "skin": {
+            "skin of body",
+            "skin epidermis",
+            "skin of prepuce of penis",
+            "scrotum skin",
+            "Skin",
+            "skin",
+        },
+        "spleen": {"spleen", "Spleen"},
+        "thymus": {"thymus", "Thymus"},
+        "vasculature": {
+            "vasculature",
+            "mesenteric artery",
+            "umbilical vein",
+            "Vasculature",
+        },
+    }
+    term2simple = {}
+    for tissue_simplified, children in tissue_mapper.items():
+        for child in children:
+            term2simple[child] = tissue_simplified
+
+    return tissues.map(term2simple)
+
+
+def clean_diseases(diseases: "pandas.Series") -> "pandas.Series":
+    """Mapper to clean disease names.
+
+    Parameters
+    ----------
+    diseases: pandas.Series
+        A pandas Series containing disease names.
+
+    Returns
+    -------
+    pandas.Series
+        A pandas Series containing cleaned disease names.
+
+    Examples
+    --------
+    >>> data.obs["disease_simple"] = clean_diseases(data.obs["disease"]).fillna("healthy")
+    """
+
+    disease_mapper = {
+        "healthy": {"healthy", "", "NA"},
+        "Alzheimer's": {
+            "Alzheimer's disease",
+        },
+        "COVID-19": {
+            "COVID-19",
+        },
+        "ILD": {
+            "pulmonary fibrosis",
+            "idiopathic pulmonary fibrosis",
+            "interstitial lung disease",
+            "systemic scleroderma;interstitial lung disease",
+            "fibrosis",
+            "hypersensitivity pneumonitis",
+        },
+        "cancer": {
+            "head and neck squamous cell carcinoma",
+            "renal cell adenocarcinoma",
+            "hepatocellular carcinoma",
+            "B-cell acute lymphoblastic leukemia",
+            "glioma",
+            "ovarian serous carcinoma",
+            "neuroblastoma",
+            "pancreatic carcinoma",
+            "melanoma",
+            "multiple myeloma",
+            "Gastrointestinal stromal tumor",
+            "neuroblastoma" "nasopharyngeal neoplasm",
+            "adenocarcinoma",
+            "pancreatic ductal adenocarcinoma",
+            "chronic lymphocytic leukemia",
+            "Uveal Melanoma",
+            "Myelofibrosis",
+        },
+        "MS": {
+            "multiple sclerosis",
+        },
+        "dengue": {
+            "dengue disease",
+        },
+        "IBD": {
+            "Crohn's disease",
+        },
+        "SLE": {"systemic lupus erythematosus"},
+        "scleroderma": {"scleroderma"},
+        "LCH": {"Langerhans Cell Histiocytosis"},
+        "NAFLD": {"non-alcoholic fatty liver disease"},
+        "Kawasaki disease": {"mucocutaneous lymph node syndrome"},
+        "eczema": {"atopic eczema"},
+        "sepsis": {"septic shock"},
+        "obesity": {"obesity"},
+        "DRESS": {"drug hypersensitivity syndrome"},
+        "hidradenitis suppurativa": {"hidradenitis suppurativa"},
+        "T2 diabetes": {"type II diabetes mellitus"},
+        "non-alcoholic steatohepatitis": {"non-alcoholic steatohepatitis"},
+        "Biliary atresia": {"Biliary atresia"},
+        "essential thrombocythemia": {"essential thrombocythemia"},
+        "HIV": {"HIV enteropathy"},
+        "monoclonal gammopathy": {"monoclonal gammopathy"},
+        "psoriatic arthritis": {"psoriatic arthritis"},
+        "RA": {"rheumatoid arthritis"},
+        "osteoarthritis": {"osteoarthritis"},
+        "periodontitis": {"periodontitis"},
+        "Lymphangioleiomyomatosis": {"Lymphangioleiomyomatosis"},
+    }
+    term2simple = {}
+    for disease_simplified, children in disease_mapper.items():
+        for child in children:
+            term2simple[child] = disease_simplified
+
+    return diseases.map(term2simple)

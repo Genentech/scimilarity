@@ -1,21 +1,35 @@
-from typing import Dict, List, Optional, Tuple
-
-import circlify as circ
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-
-mpl.rcParams["pdf.fonttype"] = 42
+from typing import List, Dict, Tuple, Optional
 
 
-def aggregate_counts(data: pd.DataFrame, levels: List[str]):
+def aggregate_counts(data: "pandas.DataFrame", levels: List[str]) -> dict:
+    """Aggregates cell counts on sample metadata and compiles it into circlify format.
+
+    Parameters
+    ----------
+    data: pandas.DataFrame
+        A pandas dataframe containing sample metadata.
+    levels: List[str]
+        Specify the groupby columns for grouping the sample metadata.
+
+    Returns
+    -------
+    dict
+        A circlify format dictionary containing grouped sample metadata.
+
+    Examples
+    --------
+    >>> circ_dict = aggregate_counts(sample_metadata, ["tissue", "disease"])
+    """
+
     data_dict = {}
     for n in range(len(levels)):
         # construct a groupby dataframe to obtain counts
         columns = levels[0 : (n + 1)]
-        df = data.groupby(columns)[columns[0]].count().reset_index(name="count")
+        df = (
+            data.groupby(columns, observed=True)[columns[0]]
+            .count()
+            .reset_index(name="count")
+        )
 
         # construct a nested dict to handle children levels
         for r in df.index:
@@ -41,13 +55,42 @@ def aggregate_counts(data: pd.DataFrame, levels: List[str]):
 
 def assign_size(
     data_dict: dict,
-    data: pd.DataFrame,
+    data: "pandas.DataFrame",
     levels: List[str],
     size_column: str,
     name_column: str,
-):
+) -> dict:
+    """Assigns circle sizes to a circlify format dictionary.
+
+    Parameters
+    ----------
+    data_dict: dict
+        A circlify format dictionary.
+    data: pandas.DataFrame
+        A pandas dataframe containing sample metadata.
+    levels: List[str]
+        Specify the groupby columns for grouping the sample metadata.
+    size_column: str
+        The name of the column that will be used for circle size.
+    name_column: str
+        The name of the column that will be used for circle name.
+
+    Returns
+    -------
+    dict
+        A circlify format dictionary.
+
+    Examples
+    --------
+    >>> circ_dict = assign_size(circ_dict, sample_metadata, ["tissue", "disease"], size_column="cells", name_column="study")
+    """
+
     df = data[levels + [size_column, name_column]]
-    df = df.groupby(levels + [name_column])[size_column].sum().reset_index(name="count")
+    df = (
+        df.groupby(levels + [name_column], observed=True)[size_column]
+        .sum()
+        .reset_index(name="count")
+    )
     for (
         r
     ) in (
@@ -64,11 +107,36 @@ def assign_size(
 
 def assign_suffix(
     data_dict: dict,
-    data: pd.DataFrame,
+    data: "pandas.DataFrame",
     levels: List[str],
     suffix_column: str,
     name_column: str,
-):
+) -> dict:
+    """Assigns circle name and suffix to a circlify format dictionary.
+
+    Parameters
+    ----------
+    data_dict: dict
+        A circlify format dictionary.
+    data: pandas.DataFrame
+        A pandas dataframe containing sample metadata.
+    levels: List[str]
+        Specify the groupby columns for grouping the sample metadata.
+    suffix_column: str
+        The name of the column that will be used for the circle name suffix.
+    name_column: str
+        The name of the column that will be used for circle name.
+
+    Returns
+    -------
+    dict
+        A circlify format dictionary.
+
+    Examples
+    --------
+    >>> circ_dict = assign_suffix(circ_dict, sample_metadata, ["tissue", "disease"], suffix_column="cells", name_column="study")
+    """
+
     df = data[levels + [suffix_column, name_column]]
     for r in df.index:  # find the deepest levels in data_dict and rename with suffix
         entry = data_dict[df.iloc[r, 0]]
@@ -83,11 +151,36 @@ def assign_suffix(
 
 def assign_colors(
     data_dict: dict,
-    data: pd.DataFrame,
+    data: "pandas.DataFrame",
     levels: List[str],
     color_column: str,
     name_column: str,
-):
+) -> dict:
+    """Assigns circle name and color to a circlify format dictionary.
+
+    Parameters
+    ----------
+    data_dict: dict
+        A circlify format dictionary.
+    data: pandas.DataFrame
+        A pandas dataframe containing sample metadata.
+    levels: List[str]
+        Specify the groupby columns for grouping the sample metadata.
+    color_column: str
+        The name of the column that will be used for the circle color.
+    name_column: str
+        The name of the column that will be used for circle name.
+
+    Returns
+    -------
+    dict
+        A circlify format dictionary.
+
+    Examples
+    --------
+    >>> circ_dict = assign_colors(circ_dict, sample_metadata, ["tissue", "disease"], color_column="cells", name_column="study")
+    """
+
     df = data[levels + [color_column, name_column]]
     for r in df.index:  # find the deepest levels in data_dict and rename with color
         entry = data_dict[df.iloc[r, 0]]
@@ -100,7 +193,24 @@ def assign_colors(
     return data_dict
 
 
-def get_children_data(data_dict: dict):
+def get_children_data(data_dict: dict) -> List[dict]:
+    """Recursively get all children data for a given circle.
+
+    Parameters
+    ----------
+    data_dict: dict
+        A circlify format dictionary
+
+    Returns
+    -------
+    List[dict]
+        A list of children data.
+
+    Examples
+    --------
+    >>> children = get_children_data(circ_dict[i]["children"])
+    """
+
     child_data = []
     for i in data_dict:  # recursively get all children data
         entry = {"id": i, "datum": data_dict[i]["datum"]}
@@ -111,7 +221,24 @@ def get_children_data(data_dict: dict):
     return child_data
 
 
-def circ_dict2data(circ_dict: dict):
+def circ_dict2data(circ_dict: dict) -> List[dict]:
+    """Convert a circlify format dictionary to the list format expected by circlify.
+
+    Parameters
+    ----------
+    data_dict: dict
+        A circlify format dictionary
+
+    Returns
+    -------
+    List[dict]
+        A list of circle data.
+
+    Examples
+    --------
+    >>> circ_data = circ_dict2data(circ_dict)
+    """
+
     circ_data = []
     for i in circ_dict:  # convert dict to circlify list data
         entry = {"id": i, "datum": circ_dict[i]["datum"]}
@@ -123,17 +250,53 @@ def circ_dict2data(circ_dict: dict):
 
 
 def draw_circles(
-    circ_data: list,
+    circ_data: List[dict],
     title: str = "",
-    fig_size: Tuple[int, int] = (10, 10),
+    figsize: Tuple[int, int] = (10, 10),
     filename: Optional[str] = None,
     use_colormap: Optional[str] = None,
     use_suffix: Optional[dict] = None,
     use_suffix_as_color: bool = False,
 ):
+    """Draw the circlify plot.
+
+    Parameters
+    ----------
+    circ_data: List[dict]
+        A circlify format list.
+    title: str, default: ""
+        The figure title.
+    figsize: Tuple[int, int], default: (10, 10)
+        The figure size in inches.
+    filename: str, optional, default: None
+        Filename to save the figure.
+    use_colormap: str, optional, default: None
+        The colormap identifier.
+    use_suffix: dict, optional, default: None
+        A mapping of suffix to color using a dictionary in the form {suffix: float}
+    use_suffix_as_color: bool, default: False
+        Use the suffix as the color.  This expects the suffix to be a float.
+
+    Examples
+    --------
+    >>> draw_circles(circ_data)
+    """
+
+    try:
+        import circlify as circ
+    except:
+        raise ImportError(
+            "Package 'circlify' not found. Please install with 'pip install circlify'."
+        )
+
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    mpl.rcParams["pdf.fonttype"] = 42
+
     circles = circ.circlify(circ_data, show_enclosure=True)
 
-    fig, ax = plt.subplots(figsize=fig_size)
+    fig, ax = plt.subplots(figsize=figsize)
     if use_colormap:
         cmap = mpl.cm.get_cmap(use_colormap)
 
@@ -235,26 +398,63 @@ def draw_circles(
         fig.savefig(filename, bbox_inches="tight")
 
 
+def hits_circles(
+    metadata: "pandas.DataFrame",
+    levels: list = ["tissue", "disease"],
+    figsize: Tuple[int, int] = (10, 10),
+    filename: Optional[str] = None,
+):
+    """Visualize sample metadata as circle plots for tissue and disease.
+
+    Parameters
+    ----------
+    metadata: pandas.DataFrame
+        A pandas dataframe containing sample metadata for nearest neighbors
+        with at least columns: ["study", "cells"], that represent the number
+        of circles and circle size respectively.
+    levels: list, default: ["tissue", "disease"]
+        The columns to uses as group levels in the circles hierarchy.
+    figsize: Tuple[int, int], default: (10, 10)
+        Figure size, width x height
+    filename: str, optional
+        Filename to save the figure.
+
+    Examples
+    --------
+    >>> hits_circles(metadata)
+    """
+
+    circ_dict = aggregate_counts(metadata, levels)
+    circ_dict = assign_size(
+        circ_dict, metadata, levels, size_column="cells", name_column="study"
+    )
+    circ_data = circ_dict2data(circ_dict)
+    draw_circles(circ_data, figsize=figsize, filename=filename)
+
+
 def hits_heatmap(
-    sample_metadata: Dict[str, pd.DataFrame],
+    sample_metadata: Dict[str, "pandas.DataFrame"],
     x: str,
     y: str,
     count_type: str = "cells",
+    figsize: Tuple[int, int] = (10, 10),
     filename: Optional[str] = None,
 ):
     """Visualize a list of sample metadata objects as a heatmap.
 
     Parameters
     ----------
-    sample_metadata: Dict[pandas.DataFrame]
+    sample_metadata: Dict[str, pandas.DataFrame]
         A dict where keys are cluster names and values are pandas dataframes containing
-        sample metadata for each cluster centroid.
+        sample metadata for each cluster centroid with columns: ["tissue", "disease", "study", "sample"].
     x: str
         x-axis label key. This corresponds to cluster name values.
     y: str
         y-axis label key. This corresponds to the dataframe column to visualize.
     count_type: {"cells", "fraction"}, default: "cells"
         Count type to color in the heatmap.
+    figsize: Tuple[int, int], default: (10, 10)
+        Figure size, width x height
     filename: str, optional
         Filename to save the figure.
 
@@ -262,6 +462,14 @@ def hits_heatmap(
     --------
     >>> hits_heatmap(sample_metadata, "time", "disease")
     """
+
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    import numpy as np
+    import pandas as pd
+    import seaborn as sns
+
+    mpl.rcParams["pdf.fonttype"] = 42
 
     valid_count_types = {"cells", "fraction"}
     if count_type not in valid_count_types:
@@ -274,11 +482,18 @@ def hits_heatmap(
     df = pd.concat(sample_metadata).reset_index(drop=True)
 
     if count_type == "cells":
-        df_m = df.groupby([x, y])["cells"].sum().unstack(level=0).fillna(0)
+        df_m = (
+            df.groupby([x, y], observed=True)["cells"].sum().unstack(level=0).fillna(0)
+        )
     else:
-        df_m = df.groupby([x, y])["fraction"].mean().unstack(level=0).fillna(0)
+        df_m = (
+            df.groupby([x, y], observed=True)["fraction"]
+            .mean()
+            .unstack(level=0)
+            .fillna(0)
+        )
 
-    fig, ax = plt.subplots(figsize=(5, 5))
+    fig, ax = plt.subplots(figsize=figsize)
     sns.heatmap(
         ax=ax,
         data=df_m,
@@ -286,10 +501,11 @@ def hits_heatmap(
         yticklabels=True,
         square=True,
         cmap="Blues",
-        linewidth=0.3,
+        linewidth=0.01,
+        linecolor="gray",
         cbar_kws={"shrink": 0.5},
     )
-    plt.tick_params(axis="both", labelsize=4)
+    plt.tick_params(axis="both", labelsize=8, grid_alpha=0.0)
 
     # xticks
     ax.xaxis.tick_top()
