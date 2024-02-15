@@ -69,7 +69,10 @@ todo_include_todos = True
 
 # nbsphinx configuration
 nbsphinx_thumbnails = {
-    'notebooks/cell_search_tutorial': '_static/search_thumbnail.png',
+    'notebooks/cell_search_tutorial_1': '_static/search_thumbnail.png',
+    'notebooks/cell_search_tutorial_2': '_static/search_thumbnail.png',
+    'notebooks/cell_search_tutorial_3': '_static/search_thumbnail.png',
+    'notebooks/cell_annotation_tutorial': '_static/advanced_thumbnail.png'
     'notebooks/advanced_tutorial': '_static/advanced_thumbnail.png'
 }
 
