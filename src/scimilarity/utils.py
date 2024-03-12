@@ -395,9 +395,21 @@ def align_dataset(
             f"Dataset incompatible: gene overlap less than {gene_overlap_threshold}. Check that var.index uses gene symbols."
         )
 
+    # check if X is dense, convert to csr_matrix if so
+    if isinstance(data.X, np.ndarray):
+        data.X = csr_matrix(data.X)
+
     # check for negatives in expression data
     if np.min(data.X) < 0:
         raise RuntimeError(f"Dataset contains negative values in expression matrix X.")
+
+    # check if counts is dense, convert to csr_matrix if so
+    if "counts" in data.layers and isinstance(data.layers["counts"], np.ndarray):
+        data.layers["counts"] = csr_matrix(data.layers["counts"])
+
+    # check for negatives in count data
+    if "counts" in data.layers and np.min(data.layers["counts"]) < 0:
+        raise RuntimeError(f"Dataset contains negative values in layers['counts'].")
 
     # return data if already aligned
     if data.var.index.values.tolist() == target_gene_order:
