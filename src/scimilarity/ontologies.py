@@ -27,8 +27,7 @@ def subset_nodes_to_set(nodes, restricted_set: Union[list, set]) -> nx.DiGraph:
 
 
 def import_cell_ontology(
-    url="/gstore/data/omni/scdb/cell-ontology-2022-09-15/cl-basic.obo",
-    # url="http://purl.obolibrary.org/obo/cl/cl-basic.obo",
+    url="http://purl.obolibrary.org/obo/cl/cl-basic.obo",
 ) -> nx.DiGraph:
     """Import taxrank cell ontology.
 

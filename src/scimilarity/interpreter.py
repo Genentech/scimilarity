@@ -210,7 +210,8 @@ class Interpreter:
             ecolor="black",
             fmt="none",
         )
-        ax.get_legend().remove()
+        if ax.get_legend() is not None:
+            ax.get_legend().remove()
 
         if filename:  # save the figure
             fig.savefig(filename, bbox_inches="tight")
