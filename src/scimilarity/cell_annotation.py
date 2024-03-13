@@ -391,17 +391,15 @@ class CellAnnotation(CellEmbedding):
 
     def annotate_dataset(
         self,
-        dataset: Union["anndata.AnnData", str],
+        data: "anndata.AnnData",
     ) -> "anndata.AnnData":
         """Annotate dataset with celltype predictions.
 
         Parameters
         ----------
-        dataset: Union[anndata.AnnData, str]
-            If a string, the filename of the h5ad file.
-            Otherwise, the annotated data matrix with rows for cells and columns for genes.
-            This function assumes the data has been log normalized (i.e. via lognorm_counts) accordingly and
-            aligned to the gene space (i.e. via align_dataset).
+        data: anndata.AnnData
+            The annotated data matrix with rows for cells and columns for genes.
+            This function assumes the data has been log normalized (i.e. via lognorm_counts) accordingly.
 
         Returns
         -------
@@ -413,16 +411,10 @@ class CellAnnotation(CellEmbedding):
         Examples
         --------
         >>> ca = CellAnnotation(model_path="/opt/data/model")
-        >>> data = annotate_dataset("/opt/individual_anndatas/GSE124898/GSM3558026/GSM3558026.h5ad")
+        >>> data = annotate_dataset(data)
         """
 
-        import anndata
         from scimilarity.utils import align_dataset
-
-        if isinstance(dataset, str):
-            data = anndata.read_h5ad(dataset)
-        else:
-            data = dataset.copy()
 
         embeddings = self.get_embeddings(align_dataset(data, self.gene_order).X)
         data.obsm["X_scimilarity"] = embeddings
