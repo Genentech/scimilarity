@@ -261,7 +261,7 @@ class CellQuery(CellEmbedding):
     def search(
         self,
         embeddings: "numpy.ndarray",
-        k: int = 1000,
+        k: int = 10000,
         ef: int = None,
         max_dist: float = None,
         exclude_studies: Optional[List[str]] = None,
@@ -272,7 +272,7 @@ class CellQuery(CellEmbedding):
         ----------
         embeddings: numpy.ndarray
             Embeddings as a numpy array.
-        k: int, default: 1000
+        k: int, default: 10000
             The number of nearest neighbors.
         ef: int, default: None
             The size of the dynamic list for the nearest neighbors. Defaults to k if None.
@@ -352,7 +352,7 @@ class CellQuery(CellEmbedding):
         self,
         data: "anndata.AnnData",
         centroid_key: str,
-        k: int = 1000,
+        k: int = 10000,
         ef: int = None,
         max_dist: float = None,
         exclude_studies: Optional[List[str]] = None,
@@ -374,7 +374,7 @@ class CellQuery(CellEmbedding):
             Requires a layers["counts"].
         centroid_key: str
             The obs column key that marks cells to centroid as 1, otherwise 0.
-        k: int, default: 1000
+        k: int, default: 10000
             The number of nearest neighbors.
         ef: int, default: None
             The size of the dynamic list for the nearest neighbors. Defaults to k if None.
@@ -457,7 +457,7 @@ class CellQuery(CellEmbedding):
         data: "anndata.AnnData",
         cluster_key: str,
         cluster_label: Optional[str] = None,
-        k: int = 1000,
+        k: int = 10000,
         ef: int = None,
         skip_null: bool = True,
         max_dist: float = None,
@@ -482,7 +482,7 @@ class CellQuery(CellEmbedding):
             The cluster label of interest. If None, then get the centroids of
             all clusters, otherwise get only the centroid for the cluster
             of interest
-        k: int, default: 1000
+        k: int, default: 10000
             The number of nearest neighbors.
         ef: int, default: None
             The size of the dynamic list for the nearest neighbors. Defaults to k if None.
