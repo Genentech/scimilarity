@@ -92,7 +92,7 @@ class CellEmbedding:
 
     def get_embeddings(
         self,
-        X: Union["scipy.sparse.csr_matrix", "numpy.ndarray"],
+        X: Union["scipy.sparse.csr_matrix", "scipy.sparse.csc_matrix", "numpy.ndarray"],
         num_cells: int = -1,
         buffer_size: int = 10000,
     ) -> "numpy.ndarray":
@@ -100,7 +100,7 @@ class CellEmbedding:
 
         Parameters
         ----------
-        X: scipy.sparse.csr_matrix, numpy.ndarray
+        X: scipy.sparse.csr_matrix, scipy.sparse.csc_matrix, numpy.ndarray
             Gene space aligned and log normalized (tp10k) gene expression matrix.
         num_cells: int, default: -1
             The number of cells to embed, starting from index 0.
@@ -123,7 +123,7 @@ class CellEmbedding:
         """
 
         import numpy as np
-        from scipy.sparse import csr_matrix
+        from scipy.sparse import csr_matrix, csc_matrix
         import torch
         import zarr
 
@@ -131,7 +131,7 @@ class CellEmbedding:
             num_cells = X.shape[0]
 
         if (
-            isinstance(X, csr_matrix)
+            (isinstance(X, csr_matrix) or isinstance(X, csc_matrix))
             and (
                 isinstance(X.data, zarr.core.Array)
                 or isinstance(X.indices, zarr.core.Array)
@@ -151,7 +151,7 @@ class CellEmbedding:
                     profiles = torch.Tensor(X[i : i + buffer_size])
                 elif isinstance(X, torch.Tensor):
                     profiles = X[i : i + buffer_size]
-                elif isinstance(X, csr_matrix):
+                elif isinstance(X, csr_matrix) or isinstance(X, csc_matrix):
                     profiles = torch.Tensor(X[i : i + buffer_size].toarray())
 
                 if profiles is None:
