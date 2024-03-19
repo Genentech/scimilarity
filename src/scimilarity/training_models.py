@@ -431,14 +431,14 @@ class MetricLearning(pl.LightningModule):
             A batch index as defined by a pytorch-lightning.
         """
 
-        if self.trainer.datamodule.test_dataset is None:
+        if self.trainer.datamodule.val_dataset is None:
             return {}
         return self._eval_step(batch, prefix="test")
 
     def on_test_epoch_end(self):
         """Pytorch-lightning test epoch end evaluation."""
 
-        if self.trainer.datamodule.test_dataset is None:
+        if self.trainer.datamodule.val_dataset is None:
             return {}
         return self._eval_epoch(prefix="test")
 
@@ -599,11 +599,10 @@ class MetricLearning(pl.LightningModule):
 
         # write metadata: data paths, timestamp
         meta_data = {
-            "train_path": self.trainer.datamodule.train_path,
-            "val_path": self.trainer.datamodule.val_path,
-            "test_path": self.trainer.datamodule.test_path,
             "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+        meta_data["train_path"] = self.trainer.datamodule.train_path
+        meta_data["val_path"] = self.trainer.datamodule.val_path
         with open(os.path.join(model_path, "metadata.json"), "w") as f:
             f.write(json.dumps(meta_data))
 

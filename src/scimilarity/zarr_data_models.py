@@ -62,7 +62,6 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         train_path: str,
         gene_order: str,
         val_path: Optional[str] = None,
-        test_path: Optional[str] = None,
         obs_field: str = "celltype_name",
         batch_size: int = 1000,
         num_workers: int = 1,
@@ -82,8 +81,6 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             after preprocessing.
         val_path: str, optional, default: None
             Path to folder containing all validation datasets.
-        test_path: str, optional, default: None
-            Path to folder containing all test datasets.
         obs_field: str, default: "celltype_name"
             The obs key name containing celltype labels.
         batch_size: int, default: 1000
@@ -105,7 +102,6 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         super().__init__()
         self.train_path = train_path
         self.val_path = val_path
-        self.test_path = test_path
         self.batch_size = batch_size
         self.num_workers = num_workers
 
@@ -180,41 +176,6 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
 
             # Lazy load val data from list of zarr datasets
             self.val_dataset = scDatasetFromList(val_data_list)
-
-        self.test_dataset = None
-        if self.test_path is not None:
-            test_data_list = []
-            self.test_Y = []
-            self.test_study = []
-
-            if self.test_path[-1] != os.sep:
-                self.test_path += os.sep
-
-            self.test_file_list = [
-                (
-                    root.replace(self.test_path, "").split(os.sep)[0],
-                    dirs[0].replace(".aligned.zarr", ""),
-                )
-                for root, dirs, files in os.walk(self.test_path)
-                if dirs and dirs[0].endswith(".aligned.zarr")
-            ]
-
-            for study, sample in tqdm(self.test_file_list):
-                data_path = os.path.join(
-                    self.test_path, study, sample, sample + ".aligned.zarr"
-                )
-                if os.path.isdir(data_path):
-                    zarr_data = ZarrDataset(data_path)
-                    test_data_list.append(zarr_data)
-                    self.test_Y.extend(
-                        zarr_data.get_obs(obs_field).astype(str).tolist()
-                    )
-                    self.test_study.extend(
-                        zarr_data.get_obs("study").astype(str).tolist()
-                    )
-
-            # Lazy load test data from list of zarr datasets
-            self.test_dataset = scDatasetFromList(test_data_list)
 
     def two_way_weighting(self, vec1: list, vec2: list) -> dict:
         """Two-way weighting.
@@ -341,14 +302,4 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             A DataLoader object containing the test dataset.
         """
 
-        if self.test_dataset is None:
-            return None
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=True,
-            drop_last=True,
-            sampler=self.get_sampler_weights(self.test_Y, self.test_study),
-            collate_fn=self.collate,
-        )
+        return self.val_dataloader()
