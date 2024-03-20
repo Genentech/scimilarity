@@ -601,8 +601,20 @@ class MetricLearning(pl.LightningModule):
         meta_data = {
             "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
-        meta_data["train_path"] = self.trainer.datamodule.train_path
-        meta_data["val_path"] = self.trainer.datamodule.val_path
+        if "train_path" in dir(self.trainer.datamodule):
+            meta_data["train_path"] = self.trainer.datamodule.train_path
+            meta_data["val_path"] = self.trainer.datamodule.val_path
+        elif "cell_tdb_uri" in dir(self.trainer.datamodule):
+            meta_data["cell_tdb_uri"] = self.trainer.datamodule.cell_tdb_uri
+            meta_data["counts_tdb_uri"] = self.trainer.datamodule.counts_tdb_uri
+            meta_data["gene_tdb_uri"] = self.trainer.datamodule.gene_tdb_uri
+            self.trainer.datamodule.data_df.to_csv(
+                os.path.join(model_path, "train_cells.csv")
+            )
+            if self.trainer.datamodule.val_df is not None:
+                self.trainer.datamodule.val_df.to_csv(
+                    os.path.join(model_path, "val_cells.csv")
+                )
         with open(os.path.join(model_path, "metadata.json"), "w") as f:
             f.write(json.dumps(meta_data))
 
