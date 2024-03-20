@@ -19,7 +19,6 @@ class scDataset(Dataset):
         self.X = X
         self.Y = Y
         self.study = study
-        self.classes = set(self.Y)
 
     def __len__(self):
         return len(self.Y)
@@ -36,7 +35,6 @@ class MetricLearningDataModule(pl.LightningDataModule):
         self,
         train_path: str,
         val_path: Optional[str] = None,
-        test_path: Optional[str] = None,
         obs_field: str = "celltype_name",
         batch_size: int = 500,
         num_workers: int = 1,
@@ -50,8 +48,6 @@ class MetricLearningDataModule(pl.LightningDataModule):
             Path to the training h5ad file.
         val_path: str, optional, default: None
             Path to the validataion h5ad file.
-        test_path: str, optional, default: None
-            Path to the test h5ad file.
         obs_field: str, default: "celltype_name"
             The obs key name containing celltype labels.
         batch_size: int, default: 1000
@@ -75,7 +71,6 @@ class MetricLearningDataModule(pl.LightningDataModule):
         super().__init__()
         self.train_path = train_path
         self.val_path = val_path
-        self.test_path = test_path
         self.obs_field = obs_field
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -108,27 +103,26 @@ class MetricLearningDataModule(pl.LightningDataModule):
         self.int2label = {
             value: key for key, value in self.label2int.items()
         }  # used during training
-        train_data.obs["label_int"] = train_data.obs[obs_field].map(self.label2int)
 
-        train_X = train_data.X  # data matrix
-        train_Y = train_data.obs["label_int"].values  # labels
         train_study = train_data.obs["study"]  # studies
         self.train_Y = train_data.obs[obs_field].values  # text labels
-        self.train_dataset = scDataset(train_X, train_Y, study=train_study)
+        self.train_dataset = scDataset(train_data.X, self.train_Y, study=train_study)
 
         self.val_dataset = None
         if val_path is not None:
-            val_X, val_Y, val_study = self.get_data(
-                self.val_path, n_obs=self.batch_size * 4
-            )
-            self.val_dataset = scDataset(val_X, val_Y, study=val_study)
+            val_data = anndata.read_h5ad(self.val_path)
+            val_data = align_dataset(
+                self.subset_valid_terms(val_data), self.gene_order
+            )  # gene space needs to match training set
+            val_data = val_data[
+                val_data.obs[self.obs_field].isin(self.class_names)
+            ]  # labels need to be subsetted to training labels
 
-        self.test_dataset = None
-        if test_path is not None:
-            test_X, test_Y, test_study = self.get_data(
-                self.test_path, n_obs=self.batch_size * 4
-            )
-            self.test_dataset = scDataset(test_X, test_Y, study=test_study)
+            if val_data.shape[0] == 0:
+                raise RuntimeError("No celltype labels have a valid ontology id.")
+            val_study = val_data.obs["study"]  # studies
+            val_Y = val_data.obs[obs_field].values  # text labels
+            self.val_dataset = scDataset(val_data.X, val_Y, study=val_study)
 
     def subset_valid_terms(self, data: anndata.AnnData) -> anndata.AnnData:
         """Keep cells whose celltype labels have valid ontology id.
@@ -150,59 +144,9 @@ class MetricLearningDataModule(pl.LightningDataModule):
             return data[valid_terms_idx]
         raise RuntimeError("No celltype labels have a valid ontology id.")
 
-    def get_data(self, filename: str, n_obs: Optional[int] = None):
-        """Get annotated data.
-
-        Parameters
-        ----------
-        filename: str
-            Filename for the h5ad data file.
-        n_obs: Optional[int]
-            Optional number of cells to keep in the subset.
-
-        Returns
-        -------
-        tuple
-            A tuple containing the X matrix, ontology ids, and study.
-        """
-
-        data = anndata.read_h5ad(filename)
-        if n_obs:  # subset n_obs from data
-            scanpy.pp.subsample(data, n_obs=n_obs)
-
-        data = align_dataset(
-            self.subset_valid_terms(data), self.gene_order
-        )  # gene space needs to match training set
-        data = data[
-            data.obs[self.obs_field].isin(self.class_names)
-        ]  # labels need to be subsetted to training labels
-        data.obs["label_int"] = data.obs[self.obs_field].map(
-            self.label2int
-        )  # labels need to be converted to ints
-
-        return data.X, data.obs.label_int.values, data.obs.study
-
-    def two_way_weighting(self, vec1, vec2) -> dict:
-        """Two-way weighting.
-
-        Parameters
-        ----------
-        vec1
-            Vector 1
-        vec2
-            Vector 2
-
-        Returns
-        -------
-        dict
-            A dictionary containing the two-way weighting.
-        """
-
-        counts = pd.crosstab(vec1, vec2)
-        weights_matrix = (1 / counts).replace(np.inf, 0)
-        return weights_matrix.unstack().to_dict()
-
-    def get_sampler_weights(self, dataset: scDataset) -> WeightedRandomSampler:
+    def get_sampler_weights(
+        self, labels: list, studies: Optional[list] = None
+    ) -> WeightedRandomSampler:
         """Get weighted random sampler.
 
         Parameters
@@ -216,20 +160,18 @@ class MetricLearningDataModule(pl.LightningDataModule):
             A WeightedRandomSampler object.
         """
 
-        if dataset.study is None:
-            class_sample_count = Counter(dataset.Y)
-            sample_weights = torch.Tensor(
-                [1.0 / class_sample_count[t] for t in dataset.Y]
-            )
+        if studies is None:
+            class_sample_count = Counter(labels)
+            sample_weights = torch.Tensor([1.0 / class_sample_count[t] for t in labels])
         else:
-            class_sample_count = Counter(dataset.Y)
-            study_sample_count = Counter(dataset.study)
+            class_sample_count = Counter(labels)
+            study_sample_count = Counter(studies)
             sample_weights = torch.Tensor(
                 [
                     1.0
-                    / class_sample_count[dataset.Y[i]]
-                    / np.log(study_sample_count[dataset.study[i]])
-                    for i in range(len(dataset.Y))
+                    / class_sample_count[labels[i]]
+                    / np.log(study_sample_count[studies[i]])
+                    for i in range(len(labels))
                 ]
             )
         return WeightedRandomSampler(sample_weights, len(sample_weights))
@@ -254,7 +196,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         )  # tuple([list(t) for t in zip(*batch)])
         return (
             torch.squeeze(torch.Tensor(np.vstack(profiles))),
-            torch.Tensor(labels),
+            torch.Tensor([self.label2int[l] for l in labels]),
             studies,
         )
 
@@ -307,14 +249,4 @@ class MetricLearningDataModule(pl.LightningDataModule):
             A DataLoader object containing the test dataset.
         """
 
-        if self.test_dataset is None:
-            return None
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            pin_memory=True,
-            drop_last=True,
-            sampler=self.get_sampler_weights(self.test_dataset),
-            collate_fn=self.collate,
-        )
+        return self.val_dataloader()
