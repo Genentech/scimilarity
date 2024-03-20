@@ -69,7 +69,7 @@ class CellAnnotation(CellEmbedding):
 
     def build_kNN(
         self,
-        input_data: Union["anndata.AnnData", str],
+        input_data: Union["anndata.AnnData", List[str]],
         knn_filename: str = "labelled_kNN.bin",
         celltype_labels_filename: str = "reference_labels.tsv",
         obs_field: str = "celltype_name",
@@ -81,9 +81,11 @@ class CellAnnotation(CellEmbedding):
 
         Parameters
         ----------
-        input_data: Union[anndata.AnnData, str],
-            If a string, the filename of h5ad data file or directory containing zarr stores.
+        input_data: Union[anndata.AnnData, List[str]],
+            If a list, it should contain a list of zarr store locations (zarr format saved by anndata).
+            The zarr data should contain cells that are already log normalized and gene space aligned.
             Otherwise, the annotated data matrix with rows for cells and columns for genes.
+            NOTE: The data should be curated to only contain valid cell ontology labels.
         knn_filename: str, default: "labelled_kNN.bin"
             Filename of the kNN index.
         celltype_labels_filename: str, default: "reference_labels.tsv"
@@ -113,14 +115,12 @@ class CellAnnotation(CellEmbedding):
         from scimilarity.zarr_dataset import ZarrDataset
         from tqdm import tqdm
 
-        if isinstance(input_data, str) and os.path.isdir(input_data):
-            data_list = [
-                f for f in os.listdir(input_data) if f.endswith(".aligned.zarr")
-            ]
+        if isinstance(input_data, list):
+            data_list = input_data
             embeddings_list = []
             labels = []
             for filename in tqdm(data_list):
-                dataset = ZarrDataset(os.path.join(input_data, filename))
+                dataset = ZarrDataset(filename)
                 obs = pd.DataFrame({obs_field: dataset.get_obs(obs_field)})
                 obs.index = obs.index.astype(str)
                 data = anndata.AnnData(
@@ -141,23 +141,12 @@ class CellAnnotation(CellEmbedding):
                 labels.extend(data.obs[obs_field].tolist())
             embeddings = np.concatenate(embeddings_list)
         else:
-            if isinstance(input_data, str) and os.path.isfile(input_data):
-                data = anndata.read_h5ad(input_data)
-            else:
-                data = input_data
+            data = input_data
 
             if target_labels is not None:
                 data = data[data.obs["celltype_name"].isin(target_labels)].copy()
-
-            name2id = {
-                value: key
-                for key, value in get_id_mapper(import_cell_ontology()).items()
-            }
-            valid_terms_idx = data.obs[obs_field].isin(name2id.keys())
-            if valid_terms_idx.any():
-                data = data[valid_terms_idx].copy()
-            else:
-                raise RuntimeError("No celltype labels have valid ontology cell ids.")
+            if len(data.obs) == 0:
+                raise RuntimeError("No cells remain after filtering.")
 
             embeddings = self.get_embeddings(align_dataset(data, self.gene_order).X)
             labels = data.obs[obs_field].tolist()
