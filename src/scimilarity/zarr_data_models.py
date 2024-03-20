@@ -177,26 +177,6 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
             # Lazy load val data from list of zarr datasets
             self.val_dataset = scDatasetFromList(val_data_list)
 
-    def two_way_weighting(self, vec1: list, vec2: list) -> dict:
-        """Two-way weighting.
-
-        Parameters
-        ----------
-        vec1
-            Vector 1
-        vec2
-            Vector 2
-
-        Returns
-        -------
-        dict
-            A dictionary containing the two-way weighting.
-        """
-
-        counts = pd.crosstab(vec1, vec2)
-        weights_matrix = (1 / counts).replace(np.inf, 0)
-        return weights_matrix.unstack().to_dict()
-
     def get_sampler_weights(
         self, labels: list, studies: Optional[list] = None
     ) -> WeightedRandomSampler:

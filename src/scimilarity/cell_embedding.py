@@ -227,8 +227,6 @@ class CellEmbedding:
         """
 
         if self.knn is None:
-            raise RuntimeError(
-                "kNN is not initialized. If no kNN index file is found, run the method build_knn."
-            )
+            raise RuntimeError("kNN is not initialized.")
         self.knn.set_ef(ef)
         return self.knn.knn_query(embeddings, k=k)
