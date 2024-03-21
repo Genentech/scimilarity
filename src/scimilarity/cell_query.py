@@ -264,7 +264,6 @@ class CellQuery(CellEmbedding):
         k: int = 10000,
         ef: int = None,
         max_dist: float = None,
-        exclude_studies: Optional[List[str]] = None,
     ) -> Tuple[List["numpy.ndarray"], List["numpy.ndarray"], "pandas.DataFrame"]:
         """Performs a cell query search against the kNN.
 
@@ -280,10 +279,6 @@ class CellQuery(CellEmbedding):
         max_dist: float, optional
             Assume k=1000000, then filter for cells that are within the max distance to the
             query. Overwrites the k parameter.
-        exclude_studies: List[str], optional, default: None
-            A list of studies to exclude from the search, given as a list of str study names.
-            WARNING: If you do not use max_dist, you will potentially get less than k hits as
-            the study exclusion is performed after the search.
 
         Returns
         -------
@@ -323,20 +318,6 @@ class CellQuery(CellEmbedding):
             nn_idxs = [row for row in nn_idxs]
             nn_dists = [row for row in nn_dists]
 
-        if exclude_studies:
-            study_index = self.cell_metadata["study"].values
-            new_nn_idxs = []
-            new_nn_dists = []
-            for row in range(len(nn_idxs)):
-                hits = [
-                    True if study_index[x] not in exclude_studies else False
-                    for x in nn_idxs[row]
-                ]
-                new_nn_idxs.append(nn_idxs[row][hits])
-                new_nn_dists.append(nn_dists[row][hits])
-            nn_idxs = new_nn_idxs
-            nn_dists = new_nn_dists
-
         metadata = []
         for i in range(len(nn_idxs)):
             hits = nn_idxs[i]
@@ -355,7 +336,6 @@ class CellQuery(CellEmbedding):
         k: int = 10000,
         ef: int = None,
         max_dist: float = None,
-        exclude_studies: Optional[List[str]] = None,
         qc: bool = True,
         qc_params: dict = {"k_clusters": 10},
     ) -> Tuple[
@@ -382,10 +362,6 @@ class CellQuery(CellEmbedding):
         max_dist: float, optional
             Assume k=1000000, then filter for cells that are within the max distance to the
             query. Overwrites the k parameter.
-        exclude_studies: List[str], optional, default: None
-            A list of studies to exclude from the search, given as a list of str study names.
-            WARNING: If you do not use max_dist, you will potentially get less than k hits as
-            the study exclusion is performed after the search.
         qc: bool, default: True
             Whether to perform QC on the query
         qc_params: dict, default: {'k_clusters': 10}
@@ -434,7 +410,6 @@ class CellQuery(CellEmbedding):
             k=k,
             ef=ef,
             max_dist=max_dist,
-            exclude_studies=exclude_studies,
         )
 
         qc_stats = {}
@@ -461,7 +436,6 @@ class CellQuery(CellEmbedding):
         ef: int = None,
         skip_null: bool = True,
         max_dist: float = None,
-        exclude_studies: Optional[List[str]] = None,
     ) -> Tuple[
         "numpy.ndarray",
         list,
@@ -492,10 +466,6 @@ class CellQuery(CellEmbedding):
         max_dist: float, optional
             Assume k=1000000, then filter for cells that are within the max distance to the
             query. Overwrites the k parameter.
-        exclude_studies: List[str], optional, default = None
-            A list of studies to exclude from the search, given as a list of str study names.
-            WARNING: If you do not use max_dist, you will potentially get less than k hits as
-            the study exclusion is performed after the search.
 
         Returns
         -------
@@ -535,7 +505,6 @@ class CellQuery(CellEmbedding):
             k=k,
             ef=ef,
             max_dist=max_dist,
-            exclude_studies=exclude_studies,
         )
 
         metadata["centroid"] = metadata["embedding_idx"].map(
