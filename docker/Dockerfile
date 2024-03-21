@@ -82,13 +82,8 @@ RUN pip3 install \
 	circlify \
 	captum \
 	torch \
-	pytorch-lightning
-
-# Install single-cell tools
-RUN pip3 install \
-    scanpy \
-	pegasusio \
-	pegasuspy
+	pytorch-lightning \
+    scanpy
 
 # Install SCimilarity API
 RUN git clone https://github.com/Genentech/scimilarity.git /tmp/scimilarity \
