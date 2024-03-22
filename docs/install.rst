@@ -32,7 +32,7 @@ Downloading the pretrained models
 
 You can download the following pretrained models for use with SCimilarity from
 Zenodo:
-https://zenodo.org/record/8240463
+https://zenodo.org/records/10685499
 
 Using the SCimilarity Docker container
 --------------------------------------------------------------------------------
