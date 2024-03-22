@@ -1,9 +1,9 @@
 from typing import Optional, Union, List, Set, Tuple
 
-from scimilarity.cell_embedding import CellEmbedding
+from scimilarity.cell_search_knn import CellSearchKNN
 
 
-class CellAnnotation(CellEmbedding):
+class CellAnnotation(CellSearchKNN):
     """A class that annotates cells using a cell embedding and then kNN search."""
 
     def __init__(

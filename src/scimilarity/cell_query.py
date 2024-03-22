@@ -1,9 +1,9 @@
 from typing import Dict, List, Optional, Tuple, Union, Set
 
-from scimilarity.cell_embedding import CellEmbedding
+from scimilarity.cell_search_knn import CellSearchKNN
 
 
-class CellQuery(CellEmbedding):
+class CellQuery(CellSearchKNN):
     """A class that searches for similar cells using a cell embedding and then a kNN search."""
 
     def __init__(
