@@ -34,22 +34,23 @@ jobs:
       #     # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
       #     # flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+      # Skip docs build and deploy as this is handled in a separate action
       # - name: Test with tox
       #   run: |
       #     tox
-
-      - name: Build docs
-        run: |
-          tox -e docs
-
-      - run: touch ./docs/_build/html/.nojekyll
-
-      - name: GH Pages Deployment
-        uses: JamesIves/github-pages-deploy-action@4.1.3
-        with:
-          branch: gh-pages # The branch the action should deploy to.
-          folder: ./docs/_build/html
-          clean: true # Automatically remove deleted files from the deploy branch
+      #
+      # - name: Build docs
+      #   run: |
+      #     tox -e docs
+      #
+      # - run: touch ./docs/_build/html/.nojekyll
+      #
+      # - name: GH Pages Deployment
+      #   uses: JamesIves/github-pages-deploy-action@4.1.3
+      #   with:
+      #     branch: gh-pages # The branch the action should deploy to.
+      #     folder: ./docs/_build/html
+      #     clean: true # Automatically remove deleted files from the deploy branch
 
       - name: Build Project and Publish
         run: |
