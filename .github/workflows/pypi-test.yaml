@@ -3,7 +3,8 @@
 
 name: Test the library
 
-on: workflow_dispatch
+on:
+  workflow_dispatch
 #   push:
 #     branches: [main]
 #   pull_request:
