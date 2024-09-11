@@ -528,47 +528,9 @@ def query_tiledb_df(
     return result
 
 
-def get_pseudobulk_values(
-    adata: "anndata.AnnData",
-) -> ["numpy.ndarray", "numpy.ndarray", "numpy.ndarray"]:
-    """Get pseudobulk values from AnnData as numpy arrays.
-
-    Parameters
-    ----------
-    adata: anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-
-    Returns
-    -------
-    counts: numpy.ndarray
-        1 x n_genes numpy array of sum of values in layer "counts".
-    detection: numpy.ndarray
-        1 x n_genes numpy array of mean detection values based on layer "counts".
-
-    Examples
-    --------
-    >>> counts, detection = get_pseudobulk_values(adata)
-    """
-
-    import numpy as np
-
-    if "counts" not in adata.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
-
-    counts = np.array(adata.layers["counts"].sum(axis=0)).reshape(-1, adata.shape[1])
-
-    detection = adata.layers["counts"].copy()
-    detection[detection > 0] = 1.0
-    detection[detection < 0] = 0.0
-    detection = np.array(detection.mean(axis=0)).reshape(-1, adata.shape[1])
-
-    return counts, detection
-
-
 def pseudobulk_anndata(
     adata: "anndata.AnnData",
-    pseudobulk_label: str,
-    groupby_labels: Optional[list] = None,
+    groupby_labels: Union[str, list],
     qc_filters: Optional[dict] = None,
     min_num_cells: int = 1,
     only_orig_genes: bool = False,
@@ -579,11 +541,8 @@ def pseudobulk_anndata(
     ----------
     adata: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
-    pseudobulk_label: str
-        Column label for basis of pseudobulk, typically the celltype name column.
-    groupby_labels: list, optional, default: None
-        Optional list of labels to groupby prior to pseudobulking based on pseudobulk_label.
-        We will always add pseudobulk_label into groupby_labels if it does not exist.
+    groupby_labels: Union[str, list]
+        List of labels to groupby prior to pseudobulking.
         For example: ["sample", "tissue", "disease", "celltype_name"]
         will groupby these columns and perform pseudobulking based on these groups.
     qc_filters: dict, optional, default: None
@@ -606,10 +565,9 @@ def pseudobulk_anndata(
 
     Examples
     --------
-    >>> pseudobulk_label = "celltype_name"
-    >>> groupby_labels = ["sample", "tissue_raw", pseudobulk_label]
+    >>> groupby_labels = ["sample", "tissue_raw", "celltype_name"]
     >>> qc_filters = {"mito_percent": 20.0, "min_counts": 1000, "min_genes": 500, "max_nn_dist": 0.03, "max_nn_dist_col": "min_dist"}
-    >>> pseudobulk = pseudobulk_anndata(adata, pseudobulk_label, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
+    >>> pseudobulk = pseudobulk_anndata(adata, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
     """
 
     import anndata
@@ -652,63 +610,23 @@ def pseudobulk_anndata(
         if max_nn_dist_col in adata.obs.columns:
             adata = adata[adata.obs[max_nn_dist_col] <= max_nn_dist].copy()
 
-    counts_list = []
-    detection_list = []
-    obs_list = []
-    if groupby_labels is None:
-        classes = Counter(adata.obs[pseudobulk_label])
-        for c in classes:
-            subset = adata[adata.obs[pseudobulk_label] == c]
-            counts, detection = get_pseudobulk_values(subset)
-            counts_list.append(counts)
-            detection_list.append(detection)
-
-            # construct the adata
-            meta = pd.DataFrame(
-                {pseudobulk_label: [c], "cells": [classes[c]]}
-            ).set_index(pseudobulk_label, drop=False)
-            meta.index = meta.index.astype(str)
-            obs_list.append(meta)
-    else:
-        if pseudobulk_label not in groupby_labels:
-            groupby_labels.append(pseudobulk_label)
-
-        # group by labels
-        df_sample = adata.obs.groupby(groupby_labels, observed=True).size()
-        df_sample = df_sample[df_sample > 0].reset_index(name="cells")
-
-        # use groups to perform pseudobulk
-        for i, row in df_sample.iterrows():
-            num_cells = row["cells"]
-            row = row.drop("cells")
-            subset = adata[(adata.obs[list(row.index)] == row).all(axis=1)]
-            counts, detection = get_pseudobulk_values(subset)
-            counts_list.append(counts)
-            detection_list.append(detection)
-
-            # Construct the adata
-            meta = (
-                pd.DataFrame(row)
-                .transpose()
-                .astype("category")
-                .set_index(pseudobulk_label, drop=False)
-            )
-            meta["cells"] = num_cells
-            meta.index = meta.index.astype(str)
-            obs_list.append(meta)
-
-    if len(counts_list) == 0:
-        return None
-
-    counts = np.vstack(counts_list)
-    detection = np.vstack(detection_list)
-    pseudobulk = anndata.AnnData(
-        X=csr_matrix(counts.shape),
-        obs=pd.concat(obs_list),
-        var=pd.DataFrame(index=adata.var.index),
+    df_sample = (
+        adata.obs.groupby(groupby_labels, observed=True)
+        .size()
+        .reset_index(name="cells")
     )
-    pseudobulk.layers["counts"] = counts
-    pseudobulk.layers["detection"] = detection
+    pseudobulk = sc.get.aggregate(
+        adata, by=groupby_labels, func=["sum", "count_nonzero"], layer="counts"
+    )
+    pseudobulk.obs = pseudobulk.obs.reset_index(drop=True)
+    pseudobulk.obs = pd.merge(pseudobulk.obs, df_sample, on=groupby_labels)
+
+    pseudobulk.layers["counts"] = pseudobulk.layers["sum"].copy()
+    del pseudobulk.layers["sum"]
+    pseudobulk.layers["detection"] = (
+        pseudobulk.layers["count_nonzero"] / pseudobulk.obs["cells"].values[:, None]
+    )
+    del pseudobulk.layers["count_nonzero"]
 
     if min_num_cells > 1:
         pseudobulk = pseudobulk[pseudobulk.obs["cells"] >= min_num_cells].copy()
