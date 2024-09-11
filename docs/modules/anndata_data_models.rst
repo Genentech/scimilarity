@@ -1,6 +1,6 @@
-scimilarity.data_models
+scimilarity.anndata_data_models
 --------------------------------------------------------------------------------
 
-.. automodule:: scimilarity.data_models
+.. automodule:: scimilarity.anndata_data_models
     :members:
     :show-inheritance:
