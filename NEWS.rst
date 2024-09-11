@@ -1,5 +1,33 @@
 Release Notes
-========================================================================
+===============================================================================
+
+Version 0.3.0 pre-release notes:  September 11, 2024
+-------------------------------------------------------------------------------
+
+Exhaustive queries: 
+  + Functionality to perform exhaustive queries in addition to kNN queries.
+  + Exhaustive queries are provided by the new method
+    `cell_query.search_exhaustive`.
+  + The kNN query method `cell_query.search` has been renamed to
+    `cell_query.search_nearest`.
+
+Query result filtering and interpretation:
+  + Results from exhaustive queries can be constrained to specific
+    metadata criteria (e.g.  tissue, disease, in vitro vs in vivo, etc.)
+    using the `metadata_filter` argument to `cell_query.search_exhaustive`.
+  + Results from exhaustive queries can be constrained by distance-to-query
+    using the `max_dist` argument to `cell_query.search_exhaustive`.
+  + The `cell_query.compile_sample_metadata` method has been expanded to
+    allow grouping by tissue and disease (in addition to study and sample).
+  + The methods `utils.subset_by_unique_values`, `utils.subset_by_frequency`,
+    and `utils.categorize_and_sort_by_score` have been added to provide
+    tools for filtering, sorting and summarizing query results.
+
+Optimizations to training:
+  + New training evalution metrics were added: ASW (`triplet_selector.get_asw`),
+    NMSE.
+  + Optimized sampling weights of study and cell type.
+
 
 Version 0.2.0:  March 22, 2024
 ------------------------------------------------------------------------
