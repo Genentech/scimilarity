@@ -5,9 +5,8 @@ Version 0.3.0 pre-release notes:  September 11, 2024
 -------------------------------------------------------------------------------
 
 Exhaustive queries: 
-  + Functionality to perform exhaustive queries in addition to kNN queries.
-  + Exhaustive queries are provided by the new method
-    `cell_query.search_exhaustive`.
+  + Functionality to perform exhaustive queries has been added as the new
+    method `cell_query.search_exhaustive`.
   + The kNN query method `cell_query.search` has been renamed to
     `cell_query.search_nearest`.
 
@@ -24,13 +23,14 @@ Query result filtering and interpretation:
     tools for filtering, sorting and summarizing query results.
 
 Optimizations to training:
-  + New training evalution metrics were added: ASW (`triplet_selector.get_asw`),
-    NMSE.
+  + The ASW and NMSE training evaluation metrics were added to multiple
+    methods.
+  + The `triplet_selector.get_asw` method was added to calculate ASW.
   + Optimized sampling weights of study and cell type.
 
 
 Version 0.2.0:  March 22, 2024
-------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 
 + Updated version requirements for multiple dependencies and removed
   the ``pegasuspy`` dependency.
@@ -42,6 +42,6 @@ Version 0.2.0:  March 22, 2024
 
 
 Version 0.1.0:  August 13, 2023
-------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 
 + Initial public release.
