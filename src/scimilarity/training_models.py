@@ -509,7 +509,7 @@ class MetricLearning(pl.LightningModule):
 
         loss = self.get_mixed_loss(triplet_loss, mse)
 
-        eval = (1 - asw) / 2 + nmse
+        evaluation_metric = (1 - asw) / 2 + nmse
 
         losses = {
             f"{prefix}_loss": loss,
@@ -522,7 +522,7 @@ class MetricLearning(pl.LightningModule):
             f"{prefix}_num_viable_triplets": num_viable_triplets,
             f"{prefix}_asw": asw,
             f"{prefix}_nmse": nmse,
-            f"{prefix}_eval": eval,
+            f"{prefix}_evaluation_metric": evaluation_metric,
         }
 
         if prefix == "val":
@@ -569,7 +569,9 @@ class MetricLearning(pl.LightningModule):
         ).mean()
         asw = torch.Tensor([step[f"{prefix}_asw"] for step in step_outputs]).mean()
         nmse = torch.Tensor([step[f"{prefix}_nmse"] for step in step_outputs]).mean()
-        eval = torch.Tensor([step[f"{prefix}_eval"] for step in step_outputs]).mean()
+        evaluation_metric = torch.Tensor(
+            [step[f"{prefix}_evaluation_metric"] for step in step_outputs]
+        ).mean()
 
         self.log(f"{prefix} loss", loss, logger=True)
         self.log(f"{prefix} triplet loss", triplet_loss, logger=True)
@@ -580,7 +582,7 @@ class MetricLearning(pl.LightningModule):
         self.log(f"{prefix} num viable triplets", num_viable_triplets, logger=True)
         self.log(f"{prefix} asw", asw, logger=True)
         self.log(f"{prefix} nmse", nmse, logger=True)
-        self.log(f"{prefix} eval", eval, logger=True)
+        self.log(f"{prefix} evaluation_metric", evaluation_metric, logger=True)
 
         losses = {
             f"{prefix}_loss": loss,
@@ -592,7 +594,7 @@ class MetricLearning(pl.LightningModule):
             f"{prefix}_num_viable_triplets": num_viable_triplets,
             f"{prefix}_asw": asw,
             f"{prefix}_nmse": nmse,
-            f"{prefix}_eval": eval,
+            f"{prefix}_evaluation_metric": evaluation_metric,
         }
         return losses
 
