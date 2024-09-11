@@ -2,9 +2,9 @@ from itertools import combinations
 import numpy as np
 import random
 import torch
-from typing import Union, Optional
+from typing import List, Union, Optional
 
-from scimilarity.ontologies import (
+from .ontologies import (
     import_cell_ontology,
     get_id_mapper,
     get_all_ancestors,
@@ -20,7 +20,7 @@ class TripletSelector:
         self,
         margin: float,
         negative_selection: str = "semihard",
-        perturb_labels: bool = False,
+        perturb_labels: bool = True,
         perturb_labels_fraction: float = 0.5,
     ):
         """Constructor.
@@ -29,12 +29,12 @@ class TripletSelector:
         ----------
         margin: float
             Triplet loss margin.
-        negative_selection: str
-            Method for negative selection: {"semihard", "hardest", "random"}
-        perturb_labels: bool, default: False
+        negative_selection: str, default: "semihard"
+            Method for negative selection: {"semihard", "hardest", "random"}.
+        perturb_labels: bool, default: True
             Whether to perturb the ontology labels by coarse graining one level up.
         perturb_labels_fraction: float, default: 0.5
-            The fraction of labels to perturb
+            The fraction of labels to perturb.
 
         Examples
         --------
@@ -329,3 +329,79 @@ class TripletSelector:
             if len(semihard_negatives) > 0
             else None
         )
+
+    def get_asw(
+        self,
+        embeddings: Union[np.ndarray, torch.Tensor],
+        labels: List[str],
+        int2label: dict,
+        metric: str = "cosine",
+    ) -> float:
+        """Get the average silhouette width of celltypes, being aware of cell ontology such that
+           ancestors are not considered inter-cluster and descendants are considered intra-cluster.
+
+        Parameters
+        ----------
+        embeddings: numpy.ndarray, torch.Tensor
+            Cell embeddings.
+        labels: List[str]
+            Celltype names.
+        int2label: dict
+            Dictionary to map labels in integer form to string
+        metric: str, default: "cosine"
+            The distance metric to use for scipy.spatial.distance.cdist().
+
+        Returns
+        -------
+        asw: float
+            The average silhouette width.
+
+        Examples
+        --------
+        >>> asw = ontology_silhouette_width(embeddings, labels, metric="cosine")
+        """
+
+        if isinstance(embeddings, torch.Tensor):
+            distance_matrix = self.pdist(embeddings.detach().cpu().numpy())
+        else:
+            distance_matrix = self.pdist(embeddings)
+
+        if isinstance(labels, torch.Tensor):
+            labels = labels.detach().cpu().numpy()
+
+        sw = []
+        for i, label1 in enumerate(labels):
+            term_id1 = self.name2id[int2label[label1]]
+            ancestors = get_all_ancestors(self.onto, term_id1)
+            descendants = get_all_descendants(self.onto, term_id1)
+
+            a_i = []
+            b_i = {}
+            for j, label2 in enumerate(labels):
+                if i == j:
+                    continue
+
+                term_id2 = self.name2id[int2label[label2]]
+                if term_id2 == term_id1 or term_id2 in descendants:  # intra-cluster
+                    a_i.append(distance_matrix[i, j])
+                elif (
+                    term_id2 != term_id1 and term_id2 not in ancestors
+                ):  # inter-cluster
+                    if term_id2 not in b_i:
+                        b_i[term_id2] = []
+                    b_i[term_id2].append(distance_matrix[i, j])
+
+            if len(a_i) <= 1 or not b_i:
+                continue
+            a_i = np.sum(a_i) / (len(a_i) - 1)
+            b_i = np.min(
+                [
+                    np.sum(values) / len(values)
+                    for values in b_i.values()
+                    if len(values) > 1
+                ]
+            )
+
+            s_i = (b_i - a_i) / np.max([a_i, b_i])
+            sw.append(s_i)
+        return np.mean(sw)
