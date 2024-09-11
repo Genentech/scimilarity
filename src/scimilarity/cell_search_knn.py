@@ -1,6 +1,6 @@
 from typing import Optional, Tuple, Union
 
-from scimilarity.cell_embedding import CellEmbedding
+from .cell_embedding import CellEmbedding
 
 
 class CellSearchKNN(CellEmbedding):
@@ -95,9 +95,6 @@ class CellSearchKNN(CellEmbedding):
 
         Examples
         --------
-        >>> from scimilarity.utils import align_dataset
-        >>> ca = CellAnnotation(model_path="/opt/data/model")
-        >>> embedding = ca.get_embeddings(align_dataset(data, ca.gene_order).X)
         >>> nn_idxs, nn_dists = get_nearest_neighbors(embeddings)
         """
 

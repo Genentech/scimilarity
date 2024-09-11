@@ -1,6 +1,6 @@
 from typing import Optional, Union, List, Set, Tuple
 
-from scimilarity.cell_search_knn import CellSearchKNN
+from .cell_search_knn import CellSearchKNN
 
 
 class CellAnnotation(CellSearchKNN):
@@ -48,6 +48,8 @@ class CellAnnotation(CellSearchKNN):
             filenames = {}
 
         self.annotation_path = os.path.join(model_path, "annotation")
+        os.makedirs(self.annotation_path, exist_ok=True)
+
         self.filenames["knn"] = os.path.join(
             self.annotation_path, filenames.get("knn", "labelled_kNN.bin")
         )
@@ -60,10 +62,13 @@ class CellAnnotation(CellSearchKNN):
         self.load_knn_index(self.filenames["knn"])
 
         # get int2label
-        with open(self.filenames["celltype_labels"], "r") as fh:
-            self.idx2label = {i: line.strip() for i, line in enumerate(fh)}
+        self.idx2label = None
+        self.classes = None
+        if self.knn is not None:
+            with open(self.filenames["celltype_labels"], "r") as fh:
+                self.idx2label = {i: line.strip() for i, line in enumerate(fh)}
+            self.classes = set(self.label2int.keys())
 
-        self.classes = set(self.label2int.keys())
         self.safelist = None
         self.blocklist = None
 
@@ -111,8 +116,8 @@ class CellAnnotation(CellSearchKNN):
         import numpy as np
         import os
         import pandas as pd
-        from scimilarity.utils import align_dataset
-        from scimilarity.zarr_dataset import ZarrDataset
+        from .utils import align_dataset
+        from .zarr_dataset import ZarrDataset
         from tqdm import tqdm
 
         if isinstance(input_data, list):
@@ -259,6 +264,7 @@ class CellAnnotation(CellSearchKNN):
         k: int = 50,
         ef: int = 100,
         weighting: bool = False,
+        disable_progress: bool = False,
     ) -> Tuple["numpy.ndarray", "numpy.ndarray", "numpy.ndarray", "pandas.DataFrame"]:
         """Get predictions from kNN search results.
 
@@ -273,6 +279,8 @@ class CellAnnotation(CellSearchKNN):
             See https://github.com/nmslib/hnswlib/blob/master/ALGO_PARAMS.md
         weighting: bool, default: False
             Use distance weighting when getting the consensus prediction.
+        disable_progress: bool, default: False
+            Disable tqdm progress bar
 
         Returns
         -------
@@ -330,7 +338,9 @@ class CellAnnotation(CellSearchKNN):
             predictions = pd.Series(nn_idxs.flatten()).map(self.idx2label)
         else:
             predictions = []
-            for nns, d_nns in tqdm(zip(nn_idxs, nn_dists), total=nn_idxs.shape[0]):
+            for nns, d_nns in tqdm(
+                zip(nn_idxs, nn_dists), total=nn_idxs.shape[0], disable=disable_progress
+            ):
                 # count celltype in nearest neighbors (optionally with distance weights)
                 celltype = defaultdict(float)
                 celltype_weighted = defaultdict(float)
@@ -403,7 +413,7 @@ class CellAnnotation(CellSearchKNN):
         >>> data = annotate_dataset(data)
         """
 
-        from scimilarity.utils import align_dataset
+        from .utils import align_dataset
 
         embeddings = self.get_embeddings(align_dataset(data, self.gene_order).X)
         data.obsm["X_scimilarity"] = embeddings

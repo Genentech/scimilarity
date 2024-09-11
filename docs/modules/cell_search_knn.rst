@@ -1,6 +1,6 @@
-scimilarity.data_models
+scimilarity.cell_search_knn
 --------------------------------------------------------------------------------
 
-.. automodule:: scimilarity.data_models
+.. automodule:: scimilarity.cell_search_knn
     :members:
     :show-inheritance:

@@ -1,5 +1,4 @@
 from datetime import datetime
-import hnswlib
 import json
 import os
 import pandas as pd
@@ -9,8 +8,8 @@ from torch import nn
 import torch.nn.functional as F
 from typing import Optional, List
 
-from scimilarity.triplet_selector import TripletSelector
-from scimilarity.nn_models import Encoder, Decoder
+from .triplet_selector import TripletSelector
+from .nn_models import Encoder, Decoder
 
 
 class TripletLoss(torch.nn.TripletMarginLoss):
@@ -23,11 +22,31 @@ class TripletLoss(torch.nn.TripletMarginLoss):
     def __init__(
         self,
         margin: float,
-        sample_across_studies: bool = False,
+        sample_across_studies: bool = True,
         negative_selection: str = "semihard",
-        perturb_labels: bool = False,
+        perturb_labels: bool = True,
         perturb_labels_fraction: float = 0.5,
     ):
+        """Constructor.
+
+        Parameters
+        ----------
+        margin: float
+            Triplet loss margin.
+        sample_across_studies: bool, default: True
+            Whether to enforce anchor-positive pairs being from different studies.
+        negative_selection: str
+            Method for negative selection: {"semihard", "hardest", "random"}
+        perturb_labels: bool, default: True
+            Whether to perturb the ontology labels by coarse graining one level up.
+        perturb_labels_fraction: float, default: 0.5
+            The fraction of labels to perturb
+
+        Examples
+        --------
+        >>> triplet_loss = TripletLoss(margin=0.05)
+        """
+
         super().__init__()
         self.margin = margin
         self.sample_across_studies = sample_across_studies
@@ -81,7 +100,7 @@ class MetricLearning(pl.LightningModule):
         hidden_dim: List[int] = [1024, 1024],
         dropout: float = 0.5,
         input_dropout: float = 0.4,
-        alpha: float = 0.003,
+        triplet_loss_weight: float = 0.001,
         margin: float = 0.05,
         negative_selection: str = "semihard",
         sample_across_studies: bool = True,
@@ -112,9 +131,9 @@ class MetricLearning(pl.LightningModule):
 
         Parameters (training)
         ----------
-        alpha: float, default 0.003
+        triplet_loss_weight: float, default 0.001
             The weighting for triplet loss vs reconstruction loss.  This weighting sums to 1
-            such that triplet loss weight is alpha and reconstruction loss weight is (1 - alpha).
+            such that triplet loss weight is triplet_loss_weight and reconstruction loss weight is (1 - triplet_loss_weight).
         margin: float, default: 0.05
             The margin parameter in triplet loss.
         negative_selection: {"semihard", "hardest", "random"}, default: "semihard"
@@ -187,7 +206,7 @@ class MetricLearning(pl.LightningModule):
         }
 
         # mixed loss weight
-        self.alpha = alpha
+        self.triplet_loss_weight = triplet_loss_weight
 
         # constraints
         self.margin = margin
@@ -267,8 +286,8 @@ class MetricLearning(pl.LightningModule):
         -------
         triplet_loss: torch.Tensor
             Triplet loss.
-        reconstruction_loss: torch.Tensor
-            reconstruction loss
+        mse: torch.Tensor
+            MSE reconstruction loss
         num_hard_triplets: torch.Tensor
             Number of hard triplets.
         num_viable_triplets: torch.Tensor
@@ -282,23 +301,29 @@ class MetricLearning(pl.LightningModule):
         triplet_loss, num_hard_triplets, num_viable_triplets = self.triplet_loss_fn(
             embedding, labels, self.trainer.datamodule.int2label, studies
         )
-        reconstruction_loss = self.mse_loss_fn(cells, reconstruction)
+        mse = self.mse_loss_fn(cells, reconstruction)
+        asw = self.triplet_loss_fn.triplet_selector.get_asw(
+            embedding, labels, self.trainer.datamodule.int2label
+        )
+        nmse = mse / cells.pow(2).mean()
         return (
             triplet_loss,
-            reconstruction_loss,
+            mse,
             num_hard_triplets,
             num_viable_triplets,
+            asw,
+            nmse,
         )
 
-    def get_mixed_loss(self, triplet_loss, reconstruction_loss):
+    def get_mixed_loss(self, triplet_loss, mse):
         """Calculate the mixed loss.
 
         Parameters
         ----------
         triplet_loss: torch.Tensor
             Triplet loss.
-        reconstruction_loss: torch.Tensor
-            reconstruction loss
+        mse: torch.Tensor
+            MSE reconstruction loss
 
         Returns
         -------
@@ -306,11 +331,13 @@ class MetricLearning(pl.LightningModule):
             Mixed loss.
         """
 
-        if self.alpha == 0:
-            return reconstruction_loss
-        if self.alpha == 1:
+        if self.triplet_loss_weight == 0:
+            return mse
+        if self.triplet_loss_weight == 1:
             return triplet_loss
-        return (self.alpha * triplet_loss) + ((1.0 - self.alpha) * reconstruction_loss)
+        return (self.triplet_loss_weight * triplet_loss) + (
+            (1.0 - self.triplet_loss_weight) * mse
+        )
 
     def training_step(self, batch, batch_idx):
         """Pytorch-lightning training step.
@@ -325,16 +352,18 @@ class MetricLearning(pl.LightningModule):
 
         (
             triplet_losses,
-            reconstruction_loss,
+            mse,
             num_hard_triplets,
             num_viable_triplets,
+            asw,
+            nmse,
         ) = self.get_losses(batch)
 
         triplet_loss = triplet_losses.mean()
         num_nonzero_loss = (triplet_losses > 0).sum(dtype=torch.float).detach()
         hard_triplets = num_hard_triplets / num_viable_triplets
 
-        loss = self.get_mixed_loss(triplet_loss, reconstruction_loss)
+        loss = self.get_mixed_loss(triplet_loss, mse)
 
         current_lr = self.scheduler["scheduler"].get_last_lr()[0]
 
@@ -367,25 +396,32 @@ class MetricLearning(pl.LightningModule):
 
         self.log("train loss", loss, prog_bar=False, logger=True)
         self.log("train triplet loss", triplet_loss, prog_bar=True, logger=True)
-        self.log(
-            "train reconstruction loss", reconstruction_loss, prog_bar=True, logger=True
-        )
+        self.log("train mse", mse, prog_bar=True, logger=True)
         self.log("train hard triplets", hard_triplets, prog_bar=True, logger=True)
-        self.log("train num nonzero loss", num_nonzero_loss, prog_bar=True, logger=True)
         self.log(
-            "train num hard triplets", num_hard_triplets, prog_bar=True, logger=True
+            "train num nonzero loss", num_nonzero_loss, prog_bar=False, logger=True
         )
         self.log(
-            "train num viable triplets", num_viable_triplets, prog_bar=True, logger=True
+            "train num hard triplets", num_hard_triplets, prog_bar=False, logger=True
         )
+        self.log(
+            "train num viable triplets",
+            num_viable_triplets,
+            prog_bar=False,
+            logger=True,
+        )
+        self.log("train asw", asw, prog_bar=True, logger=True)
+        self.log("train nmse", nmse, prog_bar=True, logger=True)
         return {
             "loss": loss,
             "triplet_loss": triplet_loss.detach(),
-            "reconstruction_loss": reconstruction_loss.detach(),
-            "train_hard_triplets": hard_triplets,
+            "mse": mse.detach(),
+            "hard_triplets": hard_triplets,
             "num_nonzeros_loss": num_nonzero_loss,
-            "train_num_hard_triplets": num_hard_triplets,
-            "train_num_viable_triplets": num_viable_triplets,
+            "num_hard_triplets": num_hard_triplets,
+            "num_viable_triplets": num_viable_triplets,
+            "asw": asw,
+            "nmse": nmse,
         }
 
     def on_validation_epoch_start(self):
@@ -460,25 +496,33 @@ class MetricLearning(pl.LightningModule):
 
         (
             triplet_losses,
-            reconstruction_loss,
+            mse,
             num_hard_triplets,
             num_viable_triplets,
+            asw,
+            nmse,
         ) = self.get_losses(batch, use_studies=False)
 
         triplet_loss = triplet_losses.mean()
         num_nonzero_loss = (triplet_losses > 0).sum()
         hard_triplets = num_hard_triplets / num_viable_triplets
 
-        loss = self.get_mixed_loss(triplet_loss, reconstruction_loss)
+        loss = self.get_mixed_loss(triplet_loss, mse)
+
+        evaluation_metric = (1 - asw) / 2 + nmse
 
         losses = {
             f"{prefix}_loss": loss,
             f"{prefix}_triplet_loss": triplet_loss,
-            f"{prefix}_reconstruction_loss": reconstruction_loss,
+            f"{prefix}_mse": mse,
             f"{prefix}_hard_triplets": hard_triplets,
             f"{prefix}_num_nonzero_loss": num_nonzero_loss,
             f"{prefix}_num_hard_triplets": num_hard_triplets,
             f"{prefix}_num_viable_triplets": num_viable_triplets,
+            f"{prefix}_num_viable_triplets": num_viable_triplets,
+            f"{prefix}_asw": asw,
+            f"{prefix}_nmse": nmse,
+            f"{prefix}_evaluation_metric": evaluation_metric,
         }
 
         if prefix == "val":
@@ -510,9 +554,7 @@ class MetricLearning(pl.LightningModule):
         triplet_loss = torch.Tensor(
             [step[f"{prefix}_triplet_loss"] for step in step_outputs]
         ).mean()
-        reconstruction_loss = torch.Tensor(
-            [step[f"{prefix}_reconstruction_loss"] for step in step_outputs]
-        ).mean()
+        mse = torch.Tensor([step[f"{prefix}_mse"] for step in step_outputs]).mean()
         hard_triplets = torch.Tensor(
             [step[f"{prefix}_hard_triplets"] for step in step_outputs]
         ).mean()
@@ -525,31 +567,40 @@ class MetricLearning(pl.LightningModule):
         num_viable_triplets = torch.Tensor(
             [step[f"{prefix}_num_viable_triplets"] for step in step_outputs]
         ).mean()
+        asw = torch.Tensor([step[f"{prefix}_asw"] for step in step_outputs]).mean()
+        nmse = torch.Tensor([step[f"{prefix}_nmse"] for step in step_outputs]).mean()
+        evaluation_metric = torch.Tensor(
+            [step[f"{prefix}_evaluation_metric"] for step in step_outputs]
+        ).mean()
 
         self.log(f"{prefix} loss", loss, logger=True)
         self.log(f"{prefix} triplet loss", triplet_loss, logger=True)
-        self.log(f"{prefix} reconstruction loss", reconstruction_loss, logger=True)
+        self.log(f"{prefix} mse", mse, logger=True)
         self.log(f"{prefix} hard triplets", hard_triplets, logger=True)
         self.log(f"{prefix} num nonzero loss", num_nonzero_loss, logger=True)
         self.log(f"{prefix} num hard triplets", num_hard_triplets, logger=True)
         self.log(f"{prefix} num viable triplets", num_viable_triplets, logger=True)
+        self.log(f"{prefix} asw", asw, logger=True)
+        self.log(f"{prefix} nmse", nmse, logger=True)
+        self.log(f"{prefix} evaluation_metric", evaluation_metric, logger=True)
 
         losses = {
             f"{prefix}_loss": loss,
             f"{prefix}_triplet_loss": triplet_loss,
-            f"{prefix}_reconstruction_loss": reconstruction_loss,
+            f"{prefix}_mse": mse,
             f"{prefix}_hard_triplets": hard_triplets,
             f"{prefix}_num_nonzero_loss": num_nonzero_loss,
             f"{prefix}_num_hard_triplets": num_hard_triplets,
             f"{prefix}_num_viable_triplets": num_viable_triplets,
+            f"{prefix}_asw": asw,
+            f"{prefix}_nmse": nmse,
+            f"{prefix}_evaluation_metric": evaluation_metric,
         }
         return losses
 
     def save_all(
         self,
         model_path: str,
-        ef_construction: int = 1000,
-        M: int = 80,
     ):
         if not os.path.isdir(model_path):
             os.makedirs(model_path)
@@ -569,7 +620,7 @@ class MetricLearning(pl.LightningModule):
             "dropout": self.dropout,
             "input_dropout": self.input_dropout,
             "margin": self.margin,
-            "alpha": self.alpha,
+            "triplet_loss_weight": self.triplet_loss_weight,
             "negative_selection": self.negative_selection,
             "sample_across_studies": self.sample_across_studies,
             "perturb_labels": self.perturb_labels,
@@ -588,10 +639,6 @@ class MetricLearning(pl.LightningModule):
         with open(os.path.join(model_path, "gene_order.tsv"), "w") as f:
             f.write("\n".join(self.trainer.datamodule.gene_order))
 
-        # write reference labels
-        with open(os.path.join(model_path, "reference_labels.tsv"), "w") as f:
-            f.write("\n".join(self.trainer.datamodule.train_Y))
-
         # write dictionary to map label_ints to labels
         pd.Series(self.trainer.datamodule.int2label).to_csv(
             os.path.join(model_path, "label_ints.csv")
@@ -604,16 +651,26 @@ class MetricLearning(pl.LightningModule):
         if "train_path" in dir(self.trainer.datamodule):
             meta_data["train_path"] = self.trainer.datamodule.train_path
             meta_data["val_path"] = self.trainer.datamodule.val_path
+            # write reference labels
+            with open(os.path.join(model_path, "reference_labels.tsv"), "w") as f:
+                f.write("\n".join(self.trainer.datamodule.train_Y))
         elif "cell_tdb_uri" in dir(self.trainer.datamodule):
             meta_data["cell_tdb_uri"] = self.trainer.datamodule.cell_tdb_uri
-            meta_data["counts_tdb_uri"] = self.trainer.datamodule.counts_tdb_uri
             meta_data["gene_tdb_uri"] = self.trainer.datamodule.gene_tdb_uri
+            meta_data["counts_tdb_uri"] = self.trainer.datamodule.counts_tdb_uri
             self.trainer.datamodule.data_df.to_csv(
                 os.path.join(model_path, "train_cells.csv")
             )
             if self.trainer.datamodule.val_df is not None:
                 self.trainer.datamodule.val_df.to_csv(
                     os.path.join(model_path, "val_cells.csv")
+                )
+            # write reference labels
+            with open(os.path.join(model_path, "reference_labels.tsv"), "w") as f:
+                f.write(
+                    "\n".join(
+                        self.trainer.datamodule.data_df["cellTypeName"].values.tolist()
+                    )
                 )
         with open(os.path.join(model_path, "metadata.json"), "w") as f:
             f.write(json.dumps(meta_data))

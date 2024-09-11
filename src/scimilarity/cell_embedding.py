@@ -35,7 +35,7 @@ class CellEmbedding:
         import json
         import os
         import pandas as pd
-        from scimilarity.nn_models import Encoder
+        from .nn_models import Encoder
 
         self.model_path = model_path
         self.use_gpu = use_gpu

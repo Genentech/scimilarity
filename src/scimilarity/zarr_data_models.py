@@ -8,10 +8,10 @@ from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 from typing import Optional
 
-from scimilarity.zarr_dataset import ZarrDataset
+from .zarr_dataset import ZarrDataset
 
 
-class scDatasetFromList(Dataset):
+class scDataset(Dataset):
     """A class that represent a collection of single cell datasets in zarr format."""
 
     def __init__(self, data_list, obs_celltype="celltype_name", obs_study="study"):
@@ -54,7 +54,7 @@ class scDatasetFromList(Dataset):
         )
 
 
-class MetricLearningZarrDataModule(pl.LightningDataModule):
+class MetricLearningDataModule(pl.LightningDataModule):
     """A class to encapsulate a collection of zarr datasets to train the model."""
 
     def __init__(
@@ -138,7 +138,7 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
                 self.train_study.extend(zarr_data.get_obs("study").astype(str).tolist())
 
         # Lazy load training data from list of zarr datasets
-        self.train_dataset = scDatasetFromList(train_data_list)
+        self.train_dataset = scDataset(train_data_list)
 
         self.class_names = set(self.train_Y)
         self.label2int = {label: i for i, label in enumerate(self.class_names)}
@@ -175,7 +175,7 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
                     )
 
             # Lazy load val data from list of zarr datasets
-            self.val_dataset = scDatasetFromList(val_data_list)
+            self.val_dataset = scDataset(val_data_list)
 
     def get_sampler_weights(
         self, labels: list, studies: Optional[list] = None
@@ -199,11 +199,15 @@ class MetricLearningZarrDataModule(pl.LightningDataModule):
         else:
             class_sample_count = Counter(labels)
             study_sample_count = Counter(studies)
+            class_sample_count = {
+                x: np.log1p(class_sample_count[x] / 1e4) for x in class_sample_count
+            }
+            study_sample_count = {
+                x: np.log1p(study_sample_count[x] / 1e5) for x in study_sample_count
+            }
             sample_weights = torch.Tensor(
                 [
-                    1.0
-                    / class_sample_count[labels[i]]
-                    / np.log(study_sample_count[studies[i]])
+                    1.0 / class_sample_count[labels[i]] / study_sample_count[studies[i]]
                     for i in range(len(labels))
                 ]
             )

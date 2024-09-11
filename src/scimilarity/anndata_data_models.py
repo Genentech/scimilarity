@@ -8,8 +8,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from typing import Optional
 
-from scimilarity.utils import align_dataset
-from scimilarity.ontologies import import_cell_ontology, get_id_mapper
+from .utils import align_dataset
+from .ontologies import import_cell_ontology, get_id_mapper
 
 
 class scDataset(Dataset):
@@ -166,11 +166,15 @@ class MetricLearningDataModule(pl.LightningDataModule):
         else:
             class_sample_count = Counter(labels)
             study_sample_count = Counter(studies)
+            class_sample_count = {
+                x: np.log1p(class_sample_count[x] / 1e4) for x in class_sample_count
+            }
+            study_sample_count = {
+                x: np.log1p(study_sample_count[x] / 1e5) for x in study_sample_count
+            }
             sample_weights = torch.Tensor(
                 [
-                    1.0
-                    / class_sample_count[labels[i]]
-                    / np.log(study_sample_count[studies[i]])
+                    1.0 / class_sample_count[labels[i]] / study_sample_count[studies[i]]
                     for i in range(len(labels))
                 ]
             )

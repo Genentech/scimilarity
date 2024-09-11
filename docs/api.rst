@@ -21,6 +21,7 @@ API Reference
     modules/cell_annotation
     modules/cell_embedding
     modules/cell_query
+    modules/cell_search_knn
     modules/interpreter
 
 .. toctree::
@@ -28,12 +29,11 @@ API Reference
     :caption: Model Training
     :hidden:
 
-    modules/data_models
+    modules/anndata_data_models
     modules/nn_models
     modules/training_models
     modules/triplet_selector
     modules/zarr_data_models
-    modules/zarr_dataset
 
 .. toctree::
     :maxdepth: 2
@@ -43,6 +43,7 @@ API Reference
     modules/ontologies
     modules/utils
     modules/visualizations
+    modules/zarr_dataset
 
 Core Functionality
 --------------------------------------------------------------------------------
@@ -54,6 +55,7 @@ attribution scoring.
 * :mod:`scimilarity.cell_annotation`
 * :mod:`scimilarity.cell_embedding`
 * :mod:`scimilarity.cell_query`
+* :mod:`scimilarity.cell_search_knn`
 * :mod:`scimilarity.interpreter`
 
 Model Training
@@ -65,7 +67,7 @@ across datasets, specialized variations of metric learning loss functions, and
 procedures for cell ontology aware triplet mining. The following modules include
 support for these training tasks.
 
-* :mod:`scimilarity.data_models`
+* :mod:`scimilarity.anndata_data_models`
 * :mod:`scimilarity.nn_models`
 * :mod:`scimilarity.training_models`
 * :mod:`scimilarity.triplet_selector`

@@ -1,10 +1,10 @@
 from typing import Dict, List, Optional, Tuple, Union, Set
 
-from scimilarity.cell_search_knn import CellSearchKNN
+from .cell_search_knn import CellSearchKNN
 
 
 class CellQuery(CellSearchKNN):
-    """A class that searches for similar cells using a cell embedding and then a kNN search."""
+    """A class that searches for similar cells using a cell embedding."""
 
     def __init__(
         self,
@@ -36,7 +36,7 @@ class CellQuery(CellSearchKNN):
         residual: bool, default: False
             Use residual connections.
         load_knn: bool, default: True
-            Load the knn index. Set to False if knn search is not needed.
+            Load the knn index. Set to False if kNN is not needed.
 
         Examples
         --------
@@ -47,7 +47,6 @@ class CellQuery(CellSearchKNN):
         import numpy as np
         import pandas as pd
         import tiledb
-        from scimilarity.utils import write_tiledb_array, optimize_tiledb_array
 
         super().__init__(
             model_path=model_path,
@@ -95,12 +94,15 @@ class CellQuery(CellSearchKNN):
             convert_dict = {
                 "index": int,
                 "prediction_nn_dist": float,
-                "fm_signature_score": float,
                 "total_counts": float,
                 "n_genes_by_counts": float,
                 "total_counts_mt": float,
                 "pct_counts_mt": float,
             }
+            if "fm_signature_score" in cell_metadata.columns:
+                convert_dict["fm_signature_score"] = float
+            for c in convert_dict:
+                cell_metadata[c] = cell_metadata[c].replace("NA", np.nan)
             cell_metadata = cell_metadata.astype(convert_dict)
             tiledb.from_pandas(metadata_tiledb_uri, cell_metadata)
         self.cell_metadata = tiledb.open_dataframe(metadata_tiledb_uri)
@@ -109,10 +111,9 @@ class CellQuery(CellSearchKNN):
         embedding_tiledb_uri = os.path.join(self.cellsearch_path, embedding_tiledb_uri)
         if not os.path.isdir(embedding_tiledb_uri):
             cell_embeddings = np.load(
-                os.path.join(cellsearch_path, self.filenames["cell_embeddings"])
+                os.path.join(self.cellsearch_path, self.filenames["cell_embeddings"])
             )
-            write_tiledb_array(embedding_tiledb_uri, cell_embeddings)
-            optimize_tiledb_array(embedding_tiledb_uri)
+            self.create_embeddings_tiledb(embedding_tiledb_uri, cell_embeddings)
         self.cell_embedding = tiledb.open(embedding_tiledb_uri)
 
         self.study_sample_index = (
@@ -123,18 +124,74 @@ class CellQuery(CellSearchKNN):
             .sort_values()
         )
 
-    def get_precomputed_embeddings(self, idx: List[int]) -> "numpy.ndarray":
+    def create_embeddings_tiledb(
+        self, tiledb_uri: str, arr: "numpy.ndarray", batch_size: int = 100000
+    ):
+        """Create TileDB array from a numpy array of embeddings.
+
+        Parameters
+        ----------
+        tiledb_uri: str
+            URI for the TileDB array.
+        batch_size: int, default: 10000
+            Batch size for the tiles.
+        """
+
+        import numpy as np
+        from .utils import write_array_to_tiledb, optimize_tiledb_array
+        import tiledb
+        from tqdm import tqdm
+
+        print(f"Configuring tiledb array: {tiledb_uri}")
+
+        xdimtype = np.int32
+        ydimtype = np.int32
+        value_type = np.float32
+
+        xdim = tiledb.Dim(
+            name="x", domain=(0, arr.shape[0] - 1), tile=batch_size, dtype=xdimtype
+        )
+        ydim = tiledb.Dim(
+            name="y", domain=(0, arr.shape[1] - 1), tile=arr.shape[1], dtype=ydimtype
+        )
+        dom = tiledb.Domain(xdim, ydim)
+
+        attr = tiledb.Attr(
+            name="vals",
+            dtype=value_type,
+            filters=tiledb.FilterList([tiledb.GzipFilter()]),
+        )
+
+        schema = tiledb.ArraySchema(
+            domain=dom,
+            sparse=False,
+            cell_order="row-major",
+            tile_order="row-major",
+            attrs=[attr],
+        )
+        tiledb.Array.create(tiledb_uri, schema)
+
+        tdbfile = tiledb.open(tiledb_uri, "w")
+        write_array_to_tiledb(
+            tdbfile, arr, value_type, row_start=0, batch_size=batch_size
+        )
+        tdbfile.close()
+        optimize_tiledb_array(tiledb_uri)
+
+    def get_precomputed_embeddings(
+        self, idx: Union[slice, List[int]]
+    ) -> "numpy.ndarray":
         """Fast get of embeddings from the cell_embedding tiledb array.
 
         Parameters
         ----------
-        idx: List[int]
-            A list of rows, which corresponds to cell indices.
+        idx: slice, List[int]
+            Cell indices.
 
         Returns
         -------
         numpy.ndarray
-            A 2D numpy array for the listed rows (cells).
+            A 2D numpy array for the listed cells.
 
         Examples
         --------
@@ -176,13 +233,21 @@ class CellQuery(CellSearchKNN):
         metadata["cell_index"] = cell_index
         return metadata
 
-    def compile_sample_metadata(self, nn_idxs: "numpy.ndarray") -> "pandas.DataFrame":
+    def compile_sample_metadata(
+        self,
+        nn_idxs: "numpy.ndarray",
+        levels: list = ["study", "sample", "tissue", "disease"],
+    ) -> "pandas.DataFrame":
         """Compile sample metadata for nearest neighbors.
 
         Parameters
         ----------
         nn_idx: numpy.ndarray
             A 2D numpy arrary of nearest neighbor indices [num_cells x k].
+        levels: list, default: ["study", "sample", "tissue", "disease"]
+            Levels for aggregation. Requires "study" and "sample" in order to
+            calculate fraction of cells that are similar to the query in the
+            relevant studies and samples.
 
         Returns
         -------
@@ -198,7 +263,6 @@ class CellQuery(CellSearchKNN):
 
         import pandas as pd
 
-        levels = ["tissue", "disease", "study", "sample"]
         df = pd.concat(
             [
                 self.cell_metadata.loc[hits]
@@ -210,62 +274,29 @@ class CellQuery(CellSearchKNN):
             axis=0,
         ).reset_index(drop=True)
 
-        study_sample_cells = self.cell_metadata.groupby(
-            ["study", "sample"], observed=True
-        ).size()
+        if "study" in levels and "sample" in levels:
+            study_sample_cells = self.cell_metadata.groupby(
+                ["study", "sample"], observed=True
+            ).size()
 
-        fraction = []
-        for i, row in df.iterrows():
-            total_cells = study_sample_cells.loc[(row["study"], row["sample"])]
-            fraction.append(row["cells"] / total_cells)
-        df["fraction"] = fraction
+            fraction = []
+            total = []
+            for i, row in df.iterrows():
+                total_cells = study_sample_cells.loc[(row["study"], row["sample"])]
+                fraction.append(row["cells"] / total_cells)
+                total.append(total_cells)
+            df["fraction"] = fraction
+            df["total"] = total
         return df
 
-    def groupby_studies(
-        self, sample_metadata: "pandas.DataFrame"
-    ) -> "pandas.DataFrame":
-        """Performs a groupby studies operation on sample metadata.
-
-        Parameters
-        ----------
-        sample_metadata: pandas.DataFrame
-            A pandas dataframe containing sample metadata for nearest neighbors.
-
-        Returns
-        -------
-        pandas.DataFrame
-            A pandas dataframe containing sample metadata groupby studies with cell counts.
-
-        Examples
-        --------
-        >>> cq.groupby_studies(sample_metadata)
-        """
-
-        levels = ["tissue", "disease", "study"]
-        df = (
-            sample_metadata[levels + ["cells"]]
-            .groupby(levels, observed=True)["cells"]
-            .sum()
-            .reset_index(name="cells")
-        )
-
-        study_cells = self.cell_metadata.groupby("study", observed=True).size()
-
-        fraction = []
-        for i, row in df.iterrows():
-            total_cells = study_cells.loc[row["study"]]
-            fraction.append(row["cells"] / total_cells)
-        df["fraction"] = fraction
-        return df
-
-    def search(
+    def search_nearest(
         self,
         embeddings: "numpy.ndarray",
         k: int = 10000,
         ef: int = None,
-        max_dist: float = None,
+        max_dist: Optional[float] = None,
     ) -> Tuple[List["numpy.ndarray"], List["numpy.ndarray"], "pandas.DataFrame"]:
-        """Performs a cell query search against the kNN.
+        """Performs a nearest neighbors search against the kNN.
 
         Parameters
         ----------
@@ -293,7 +324,7 @@ class CellQuery(CellSearchKNN):
 
         Examples
         --------
-        >>> nn_idxs, nn_dists, metadata = cq.search(embedding)
+        >>> nn_idxs, nn_dists, metadata = cq.search_nearest(embeddings)
         """
 
         import pandas as pd
@@ -329,15 +360,16 @@ class CellQuery(CellSearchKNN):
 
         return nn_idxs, nn_dists, metadata
 
-    def search_centroid(
+    def search_centroid_kNN(
         self,
-        data: "anndata.AnnData",
+        adata: "anndata.AnnData",
         centroid_key: str,
         k: int = 10000,
         ef: int = None,
-        max_dist: float = None,
+        max_dist: Optional[float] = None,
         qc: bool = True,
         qc_params: dict = {"k_clusters": 10},
+        random_seed: int = 4,
     ) -> Tuple[
         "numpy.ndarray",
         List["numpy.ndarray"],
@@ -345,11 +377,11 @@ class CellQuery(CellSearchKNN):
         "pandas.DataFrame",
         dict,
     ]:
-        """Performs a cell query search for a centroid constructed from marked cells.
+        """Performs a nearest neighbors search for a centroid constructed from marked cells.
 
         Parameters
         ----------
-        data: anndata.AnnData
+        adata: anndata.AnnData
             Annotated data matrix with rows for cells and columns for genes.
             Requires a layers["counts"].
         centroid_key: str
@@ -367,6 +399,8 @@ class CellQuery(CellSearchKNN):
         qc_params: dict, default: {'k_clusters': 10}
             Parameters for the QC:
             k_clusters: the number of clusters in kmeans clustering
+        random_seed: int, default: 1
+            Random seed for k-means clustering
 
         Returns
         -------
@@ -387,15 +421,14 @@ class CellQuery(CellSearchKNN):
         --------
         >>> cells_used_in_query = adata.obs["celltype_name"] == "macrophage"
         >>> adata.obs["used_in_query"] = cells_used_in_query.astype(int)
-        >>> centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats = cq.search_centroid(adata, 'used_in_query')
+        >>> centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats = cq.search_centroid_kNN(adata, 'used_in_query')
         """
 
         import numpy as np
         from scipy.cluster.vq import kmeans
-        from scipy.spatial.distance import cdist, pdist, squareform
-        from scimilarity.utils import get_centroid, get_dist2centroid
+        from .utils import get_centroid, get_dist2centroid
 
-        cells = data[data.obs[centroid_key] == 1].copy()
+        cells = adata[adata.obs[centroid_key] == 1].copy()
         centroid = get_centroid(cells.layers["counts"])
         centroid_embedding = self.get_embeddings(centroid)
 
@@ -405,7 +438,7 @@ class CellQuery(CellSearchKNN):
         if ef is None:
             ef = k
 
-        (nn_idxs, nn_dists, metadata) = self.search(
+        nn_idxs, nn_dists, metadata = self.search_nearest(
             centroid_embedding,
             k=k,
             ef=ef,
@@ -416,26 +449,26 @@ class CellQuery(CellSearchKNN):
         if qc:
             cells_embedding = self.get_embeddings(cells.X)
             k_clusters = qc_params.get("k_clusters", 10)
-            cluster_centroids = kmeans(cells_embedding, k_clusters)[0]
+            cluster_centroids = kmeans(cells_embedding, k_clusters, seed=random_seed)[0]
 
-            cell_nn_idxs, _, _ = self.search(cluster_centroids, k=100)
+            cell_nn_idxs, _, _ = self.search_nearest(cluster_centroids, k=100)
             query_overlap = []
             for i in range(len(cell_nn_idxs)):
                 overlap = [x for x in cell_nn_idxs[i] if x in nn_idxs[0]]
                 query_overlap.append(len(overlap))
-            qc_stats["query_stability"] = np.mean(query_overlap)
+            qc_stats["query_coherence"] = np.mean(query_overlap)
 
         return centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats
 
-    def search_cluster_centroids(
+    def search_cluster_centroids_kNN(
         self,
-        data: "anndata.AnnData",
+        adata: "anndata.AnnData",
         cluster_key: str,
         cluster_label: Optional[str] = None,
         k: int = 10000,
         ef: int = None,
         skip_null: bool = True,
-        max_dist: float = None,
+        max_dist: Optional[float] = None,
     ) -> Tuple[
         "numpy.ndarray",
         list,
@@ -443,11 +476,11 @@ class CellQuery(CellSearchKNN):
         Dict[str, "numpy.ndarray"],
         "pandas.DataFrame",
     ]:
-        """Performs a cell query search for cluster centroids against the kNN.
+        """Performs a nearest neighbors search for cluster centroids against the kNN.
 
         Parameters
         ----------
-        data: anndata.AnnData
+        adata: anndata.AnnData
             Annotated data matrix with rows for cells and columns for genes.
             Requires a layers["counts"].
         cluster_key: str
@@ -483,13 +516,13 @@ class CellQuery(CellSearchKNN):
 
         Examples
         --------
-        >>> centroid_embeddings, cluster_idx, nn_idx, nn_dists, all_metadata = cq.search_cluster_centroids(data, "leidan")
+        >>> centroid_embeddings, cluster_idx, nn_idx, nn_dists, all_metadata = cq.search_cluster_centroids_kNN(adata, "leidan")
         """
 
-        from scimilarity.utils import get_cluster_centroids
+        from .utils import get_cluster_centroids
 
         centroids, cluster_idx = get_cluster_centroids(
-            data, self.gene_order, cluster_key, cluster_label, skip_null=skip_null
+            adata, self.gene_order, cluster_key, cluster_label, skip_null=skip_null
         )
 
         centroid_embeddings = self.get_embeddings(centroids)
@@ -500,7 +533,7 @@ class CellQuery(CellSearchKNN):
         if ef is None:
             ef = k
 
-        (nn_idxs, nn_dists, metadata) = self.search(
+        nn_idxs, nn_dists, metadata = self.search_nearest(
             centroid_embeddings,
             k=k,
             ef=ef,
@@ -524,3 +557,171 @@ class CellQuery(CellSearchKNN):
             nn_dists_dict,
             metadata,
         )
+
+    def search_exhaustive(
+        self,
+        embeddings: "numpy.ndarray",
+        max_dist: float = 0.03,
+        metadata_filter: Optional[dict] = None,
+        buffer_size: int = 100000,
+    ) -> Tuple[List["numpy.ndarray"], List["numpy.ndarray"], "pandas.DataFrame"]:
+        """Performs an exhaustive search.
+
+        Parameters
+        ----------
+        embeddings: numpy.ndarray
+            Embeddings as a numpy array.
+        max_dist: float, default: 0.03
+            Filter for cells that are within the max distance to the query.
+        metadata_filter: dict, optional, default: None
+            A dictionary where keys represent column names and values
+            represent valid terms in the columns.
+        buffer_size: int, default: 100000
+            Batch size for processing cells.
+
+        Returns
+        -------
+        nn_idxs: List[numpy.ndarray]
+            A list of 2D numpy array of cell indices.
+            One entry for every cell (row) in embeddings
+        nn_dists: List[numpy.ndarray]
+            A list of 2D numpy array of cell distances.
+            One entry for every cell (row) in embeddings
+        metadata: pandas.DataFrame
+            A pandas dataframe containing cell metadata.
+
+        Examples
+        --------
+        >>> nn_idxs, nn_dists, metadata = cq.search_exhaustive(embeddings)
+        """
+
+        import numpy as np
+        import pandas as pd
+        from scipy.spatial.distance import cdist
+
+        nn_idxs = [[] for _ in range(embeddings.shape[0])]
+        nn_dists = [[] for _ in range(embeddings.shape[0])]
+        n_cells = self.cell_metadata.shape[0]
+        for i in range(0, n_cells, buffer_size):
+            nn_idx = np.array(list(range(i, min(i + buffer_size, n_cells))))
+            nn_dist = cdist(
+                embeddings, self.get_precomputed_embeddings(nn_idx), metric="cosine"
+            )
+
+            for row in range(nn_dist.shape[0]):
+                hits = nn_dist[row] <= max_dist
+                metadata_hits = []
+                if metadata_filter is not None:
+                    for k, v in metadata_filter.items():
+                        metadata_hits.append(
+                            (self.cell_metadata.loc[nn_idx, k] == v).values
+                        )
+                    if len(metadata_hits) > 1:
+                        metadata_hits = np.all(np.vstack(metadata_hits), axis=0)
+                    hits = np.all(np.vstack([hits, metadata_hits]), axis=0)
+                nn_idxs[row].append(nn_idx[hits])
+                nn_dists[row].append(nn_dist[row, hits])
+
+        # sort by lowest distance
+        for row in range(len(nn_idxs)):
+            nn_idxs[row] = np.hstack(nn_idxs[0])
+            nn_dists[row] = np.hstack(nn_dists[row])
+            sorted_indices = np.argsort(nn_dists[row])
+            nn_idxs[row] = nn_idxs[row][sorted_indices]
+            nn_dists[row] = nn_dists[row][sorted_indices]
+
+        metadata = []
+        for row in range(len(nn_idxs)):
+            hits = nn_idxs[row]
+            df = self.cell_metadata.loc[hits].reset_index(drop=True)
+            df["embedding_idx"] = row
+            df["query_nn_dist"] = nn_dists[row]
+            metadata.append(df)
+        metadata = pd.concat(metadata).reset_index(drop=True)
+
+        return nn_idxs, nn_dists, metadata
+
+    def search_centroid_exhaustive(
+        self,
+        adata: "anndata.AnnData",
+        centroid_key: str,
+        max_dist: float = 0.03,
+        qc: bool = True,
+        qc_params: dict = {"k_clusters": 10},
+        random_seed: int = 4,
+    ) -> Tuple[
+        "numpy.ndarray",
+        List["numpy.ndarray"],
+        List["numpy.ndarray"],
+        "pandas.DataFrame",
+        dict,
+    ]:
+        """Performs a nearest neighbors search for a centroid constructed from marked cells.
+
+        Parameters
+        ----------
+        adata: anndata.AnnData
+            Annotated data matrix with rows for cells and columns for genes.
+            Requires a layers["counts"].
+        centroid_key: str
+            The obs column key that marks cells to centroid as 1, otherwise 0.
+        max_dist: float, optional
+            Assume k=1000000, then filter for cells that are within the max distance to the
+            query. Overwrites the k parameter.
+        qc: bool, default: True
+            Whether to perform QC on the query
+        qc_params: dict, default: {'k_clusters': 10}
+            Parameters for the QC:
+            k_clusters: the number of clusters in kmeans clustering
+        random_seed: int, default: 1
+            Random seed for k-means clustering
+
+        Returns
+        -------
+        centroid_embedding: numpy.ndarray
+            A 2D numpy array of the centroid embedding.
+        nn_idxs: List[numpy.ndarray]
+            A list of 2D numpy array of nearest neighbor indices.
+            One entry for every cell (row) in embeddings
+        nn_dists: List[numpy.ndarray]
+            A list of 2D numpy array of nearest neighbor distances.
+            One entry for every cell (row) in embeddings
+        metadata: pandas.DataFrame
+            A pandas dataframe containing cell metadata for nearest neighbors.
+        qc_stats: dict
+            A dictionary of stats for QC.
+
+        Examples
+        --------
+        >>> cells_used_in_query = adata.obs["celltype_name"] == "macrophage"
+        >>> adata.obs["used_in_query"] = cells_used_in_query.astype(int)
+        >>> centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats = cq.search_centroid_exhaustive(adata, 'used_in_query')
+        """
+
+        import numpy as np
+        from scipy.cluster.vq import kmeans
+        from .utils import get_centroid, get_dist2centroid
+
+        cells = adata[adata.obs[centroid_key] == 1].copy()
+        centroid = get_centroid(cells.layers["counts"])
+        centroid_embedding = self.get_embeddings(centroid)
+
+        nn_idxs, nn_dists, metadata = self.search_exhaustive(
+            centroid_embedding,
+            max_dist=max_dist,
+        )
+
+        qc_stats = {}
+        if qc:
+            cells_embedding = self.get_embeddings(cells.X)
+            k_clusters = qc_params.get("k_clusters", 10)
+            cluster_centroids = kmeans(cells_embedding, k_clusters, seed=random_seed)[0]
+
+            cell_nn_idxs, _, _ = self.search_nearest(cluster_centroids, k=100)
+            query_overlap = []
+            for i in range(len(cell_nn_idxs)):
+                overlap = [x for x in cell_nn_idxs[i] if x in nn_idxs[0]]
+                query_overlap.append(len(overlap))
+            qc_stats["query_coherence"] = np.mean(query_overlap)
+
+        return centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats

@@ -1,195 +1,6 @@
 from typing import Optional, Union, Tuple, List
 
 
-def get_pseudobulk_values(
-    data: "anndata.AnnData",
-) -> ["numpy.ndarray", "numpy.ndarray", "numpy.ndarray"]:
-    """Get pseudobulk values from AnnData as numpy arrays.
-
-    Parameters
-    ----------
-    data: anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-
-    Returns
-    -------
-    counts: numpy.ndarray
-        1 x n_genes numpy array of sum of values in layer "counts".
-    detection: numpy.ndarray
-        1 x n_genes numpy array of mean detection values based on layer "counts".
-
-    Examples
-    --------
-    >>> counts, detection = get_pseudobulk_values(data)
-    """
-
-    import numpy as np
-
-    if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
-
-    counts = np.array(data.layers["counts"].sum(axis=0)).reshape(-1, data.shape[1])
-
-    detection = data.layers["counts"].copy()
-    detection[detection > 0] = 1.0
-    detection[detection < 0] = 0.0
-    detection = np.array(detection.mean(axis=0)).reshape(-1, data.shape[1])
-
-    return counts, detection
-
-
-def pseudobulk_anndata(
-    data: "anndata.AnnData",
-    pseudobulk_label: str,
-    groupby_labels: Optional[list] = None,
-    qc_filters: Optional[dict] = None,
-    min_num_cells: int = 1,
-    only_orig_genes: bool = False,
-):
-    """Pseudobulk an AnnData and return a new AnnData.
-
-    Parameters
-    ----------
-    data: anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-    pseudobulk_label: str
-        Column label for basis of pseudobulk, typically the celltype name column.
-    groupby_labels: list, optional, default: None
-        Optional list of labels to groupby prior to pseudobulking based on pseudobulk_label.
-        We will always add pseudobulk_label into groupby_labels if it does not exist.
-        For example: ["sample", "tissue", "disease", "celltype_name"]
-        will groupby these columns and perform pseudobulking based on these groups.
-    qc_filters: dict, optional, default: None
-        Dictionary containing cell filters to perform prior to pseudobulking:
-            "mito_percent": max percent of reads in mitochondrial genes
-            "min_counts": min read count for cell
-            "min_genes": min number of genes with reads for cell
-            "max_nn_dist": max nearest neighbor distance to a reference label for predicted labels.
-    min_num_cells: int, default: 1
-        The minimum number of cells in a pseudobulk in order to be considered.
-    only_orig_genes: bool, default: False
-        Account for an aligned gene space and mask non original genes to the dataset with NaN as
-        their pseudobulk. Assumes the original gene list is in data.uns["orig_genes"].
-
-    Examples
-    --------
-    >>> pseudobulk_label = "celltype_name"
-    >>> groupby_labels = ["sample", "tissue_raw", pseudobulk_label]
-    >>> qc_filters = {"mito_percent": 20.0, "min_counts": 1000, "min_genes": 500, "max_nn_dist": 0.03, "max_nn_dist_col": "min_dist"}
-    >>> pseudobulk = pseudobulk_anndata(data, pseudobulk_label, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
-    """
-
-    import anndata
-    from collections import Counter
-    import numpy as np
-    import pandas as pd
-    import scanpy as sc
-    from scipy.sparse import csr_matrix
-
-    if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
-
-    if qc_filters is not None:
-        # determine prefix for mitochondrial genes
-        mito_prefix = "MT-"
-        if any(data.var.index.str.startswith("mt-")) is True:
-            mito_prefix = "mt-"
-
-        mito_percent = qc_filters.get("mito_percent", 100.0)
-        min_counts = qc_filters.get("min_counts", None)
-        min_genes = qc_filters.get("min_genes", None)
-        max_nn_dist = qc_filters.get("max_nn_dist", 0.03)
-        max_nn_dist_col = qc_filters.get("max_nn_dist_col", "nn_dist")
-
-        data = data.copy()
-        data.var["mt"] = data.var_names.str.startswith(mito_prefix)
-        sc.pp.calculate_qc_metrics(
-            data,
-            qc_vars=["mt"],
-            percent_top=None,
-            log1p=False,
-            inplace=True,
-            layer="counts",
-        )
-        data = data[data.obs["pct_counts_mt"] <= mito_percent].copy()
-        if min_counts is not None:
-            data = data[data.obs["total_counts"] >= min_counts].copy()
-        if min_genes is not None:
-            data = data[data.obs["n_genes_by_counts"] >= min_genes].copy()
-        if max_nn_dist_col in data.obs.columns:
-            data = data[data.obs[max_nn_dist_col] <= max_nn_dist].copy()
-
-    counts_list = []
-    detection_list = []
-    obs_list = []
-    if groupby_labels is None:
-        classes = Counter(data.obs[pseudobulk_label])
-        for c in classes:
-            subset = data[data.obs[pseudobulk_label] == c]
-            counts, detection = get_pseudobulk_values(subset)
-            counts_list.append(counts)
-            detection_list.append(detection)
-
-            # construct the adata
-            meta = pd.DataFrame(
-                {pseudobulk_label: [c], "cells": [classes[c]]}
-            ).set_index(pseudobulk_label, drop=False)
-            meta.index = meta.index.astype(str)
-            obs_list.append(meta)
-    else:
-        if pseudobulk_label not in groupby_labels:
-            groupby_labels.append(pseudobulk_label)
-
-        # group by labels
-        df_sample = data.obs.groupby(groupby_labels, observed=True).size()
-        df_sample = df_sample[df_sample > 0].reset_index(name="cells")
-
-        # use groups to perform pseudobulk
-        for i, row in df_sample.iterrows():
-            num_cells = row["cells"]
-            row = row.drop("cells")
-            subset = data[(data.obs[list(row.index)] == row).all(axis=1)]
-            counts, detection = get_pseudobulk_values(subset)
-            counts_list.append(counts)
-            detection_list.append(detection)
-
-            # Construct the adata
-            meta = (
-                pd.DataFrame(row)
-                .transpose()
-                .astype("category")
-                .set_index(pseudobulk_label, drop=False)
-            )
-            meta["cells"] = num_cells
-            meta.index = meta.index.astype(str)
-            obs_list.append(meta)
-
-    if len(counts_list) == 0:
-        return None
-
-    counts = np.vstack(counts_list)
-    detection = np.vstack(detection_list)
-    adata = anndata.AnnData(
-        X=csr_matrix(counts.shape),
-        obs=pd.concat(obs_list),
-        var=pd.DataFrame(index=data.var.index),
-    )
-    adata.layers["counts"] = counts
-    adata.layers["detection"] = detection
-
-    if min_num_cells > 1:
-        adata = adata[adata.obs["cells"] >= min_num_cells].copy()
-    if only_orig_genes and "uns" in dir(data) and "orig_genes" in data.uns:
-        orig_genes = set(data.uns["orig_genes"])
-        not_orig_genes_idx = [
-            i for i, x in enumerate(data.var.index.tolist()) if x not in orig_genes
-        ]
-        adata[:, not_orig_genes_idx] = np.nan
-        adata.layers["counts"][:, not_orig_genes_idx] = np.nan
-        adata.layers["detection"][:, not_orig_genes_idx] = np.nan
-    return adata
-
-
 def lognorm_counts(
     data: "anndata.AnnData",
 ) -> "anndata.AnnData":
@@ -233,124 +44,6 @@ def lognorm_counts(
     sc.pp.log1p(data)
     del data.uns["log1p"]
 
-    return data
-
-
-def filter_cells(
-    data: "anndata.AnnData",
-    min_genes: int = 400,
-    mito_prefix: Optional[str] = None,
-    mito_percent: float = 30.0,
-) -> "anndata.AnnData":
-    """QC filter cells in the dataset from gene expression raw counts.
-
-    Parameters
-    ----------
-    data: anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-    min_genes: int, default: 400
-        The minimum number of expressed genes in order not to be filtered out.
-    mito_prefix: str, optional, default: None
-        The prefix to represent mitochondria genes. Typically "MT-" or "mt-".
-        If None, it will try to infer whether it is either "MT-" or "mt-".
-    mito_percent: float, default: 30.0
-        The maximum percent allowed expressed mitochondria genes in order not to be filtered out.
-
-    Returns
-    -------
-    anndata.AnnData
-        A data object with cells filtered out based on QC metrics that is ready to be used
-        in further processes.
-
-    Examples
-    --------
-    >>> data = filter_cells(data)
-    """
-
-    import scanpy as sc
-
-    if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
-
-    # determine between "MT-" and "mt-"
-    if not mito_prefix:
-        mito_prefix = "MT-"
-        if any(data.var.index.str.startswith("mt-")) is True:
-            mito_prefix = "mt-"
-
-    # filter
-    data.var["mt"] = data.var_names.str.startswith(mito_prefix)
-    sc.pp.calculate_qc_metrics(
-        data,
-        qc_vars=["mt"],
-        percent_top=None,
-        log1p=False,
-        inplace=True,
-        layer="counts",
-    )
-    data = data[data.obs["pct_counts_mt"] < mito_percent].copy()
-    cell_subset, _ = sc.pp.filter_cells(data, min_genes=min_genes, inplace=False)
-    data = data[cell_subset].copy()
-
-    return data
-
-
-def consolidate_duplicate_symbols(
-    data: "anndata.AnnData",
-) -> "anndata.AnnData":
-    """Consolidate duplicate gene symbols with sum.
-
-    Parameters
-    ----------
-    data: anndata.AnnData
-        Annotated data matrix with rows for cells and columns for genes.
-
-    Returns
-    -------
-    anndata.AnnData
-        AnnData object with duplicate gene symbols consolidated.
-
-    Examples
-    --------
-    >>> data = consolidate_duplicate_symbols(data)
-    """
-
-    import anndata
-    from collections import Counter
-    import pandas as pd
-    from scipy.sparse import csr_matrix
-
-    if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
-
-    gene_count = Counter(data.var.index.values)
-    dup_genes = {k for k in gene_count if gene_count[k] > 1}
-    if len(dup_genes) == 0:
-        return data
-
-    dup_genes_data = []
-    for k in dup_genes:
-        idx = [i for i, x in enumerate(data.var.index.values) if x == k]
-        X = csr_matrix(data.layers["counts"][:, idx].sum(axis=1))
-        gene_data = anndata.AnnData(
-            X=X,
-            var=pd.DataFrame(index=[k]),
-        )
-        gene_data.layers["counts"] = X.copy()
-        dup_genes_data.append(gene_data.copy())
-        del gene_data
-
-    obs = data.obs.copy()
-    dup_genes_data = anndata.concat(dup_genes_data, axis=1)
-    dup_genes_data.obs = obs.reset_index(drop=True)
-    dup_genes_data.obs.index = dup_genes_data.obs.index.astype(str)
-
-    data.obs = obs.reset_index(drop=True)
-    data.obs.index = data.obs.index.astype(str)
-    data = anndata.concat(
-        [data[:, ~data.var.index.isin(dup_genes)].copy(), dup_genes_data], axis=1
-    )
-    data.obs = obs.copy()
     return data
 
 
@@ -431,6 +124,124 @@ def align_dataset(
         raise RuntimeError(f"Empty gene space detected.")
 
     return shell
+
+
+def filter_cells(
+    data: "anndata.AnnData",
+    min_genes: int = 400,
+    mito_prefix: Optional[str] = None,
+    mito_percent: float = 30.0,
+) -> "anndata.AnnData":
+    """QC filter cells in the dataset from gene expression raw counts.
+
+    Parameters
+    ----------
+    data: anndata.AnnData
+        Annotated data matrix with rows for cells and columns for genes.
+    min_genes: int, default: 400
+        The minimum number of expressed genes in order not to be filtered out.
+    mito_prefix: str, optional, default: None
+        The prefix to represent mitochondria genes. Typically "MT-" or "mt-".
+        If None, it will try to infer whether it is either "MT-" or "mt-".
+    mito_percent: float, default: 30.0
+        The maximum percent allowed expressed mitochondria genes in order not to be filtered out.
+
+    Returns
+    -------
+    anndata.AnnData
+        A data object with cells filtered out based on QC metrics that is ready to be used
+        in further processes.
+
+    Examples
+    --------
+    >>> data = filter_cells(data)
+    """
+
+    import scanpy as sc
+
+    if "counts" not in data.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+
+    # determine between "MT-" and "mt-"
+    if not mito_prefix:
+        mito_prefix = "MT-"
+        if any(data.var.index.str.startswith("mt-")) is True:
+            mito_prefix = "mt-"
+
+    # filter
+    data.var["mt"] = data.var_names.str.startswith(mito_prefix)
+    sc.pp.calculate_qc_metrics(
+        data,
+        qc_vars=["mt"],
+        percent_top=None,
+        log1p=False,
+        inplace=True,
+        layer="counts",
+    )
+    data = data[data.obs["pct_counts_mt"] < mito_percent].copy()
+    cell_subset, _ = sc.pp.filter_cells(data, min_genes=min_genes, inplace=False)
+    data = data[cell_subset].copy()
+
+    return data
+
+
+def consolidate_duplicate_symbols(
+    adata: "anndata.AnnData",
+) -> "anndata.AnnData":
+    """Consolidate duplicate gene symbols with sum.
+
+    Parameters
+    ----------
+    adata: anndata.AnnData
+        Annotated data matrix with rows for cells and columns for genes.
+
+    Returns
+    -------
+    anndata.AnnData
+        AnnData object with duplicate gene symbols consolidated.
+
+    Examples
+    --------
+    >>> adata = consolidate_duplicate_symbols(adata)
+    """
+
+    import anndata
+    from collections import Counter
+    import pandas as pd
+    from scipy.sparse import csr_matrix
+
+    if "counts" not in adata.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+
+    gene_count = Counter(adata.var.index.values)
+    dup_genes = {k for k in gene_count if gene_count[k] > 1}
+    if len(dup_genes) == 0:
+        return adata
+
+    dup_genes_data = []
+    for k in dup_genes:
+        idx = [i for i, x in enumerate(adata.var.index.values) if x == k]
+        counts = csr_matrix(adata.layers["counts"][:, idx].sum(axis=1))
+        gene_data = anndata.AnnData(
+            X=csr_matrix(counts.shape),
+            var=pd.DataFrame(index=[k]),
+        )
+        gene_data.layers["counts"] = counts
+        dup_genes_data.append(gene_data)
+
+    obs = adata.obs.copy()
+    dup_genes_data = anndata.concat(dup_genes_data, axis=1)
+    dup_genes_data.obs = obs.reset_index(drop=True)
+    dup_genes_data.obs.index = dup_genes_data.obs.index.astype(str)
+
+    adata.obs = obs.reset_index(drop=True)
+    adata.obs.index = adata.obs.index.astype(str)
+    adata = anndata.concat(
+        [adata[:, ~adata.var.index.isin(dup_genes)].copy(), dup_genes_data], axis=1
+    )
+    adata.obs = obs.copy()
+
+    return adata
 
 
 def get_centroid(
@@ -574,137 +385,84 @@ def get_cluster_centroids(
     return centroids, cluster_idx
 
 
-def write_tiledb_array(
-    tiledb_array_uri: str, arr: "numpy.ndarray", batch_size: int = 100000
+def write_array_to_tiledb(
+    tdb: "tiledb.libtiledb.DenseArrayImpl",
+    arr: "numpy.ndarray",
+    value_type: type,
+    row_start: int = 0,
+    batch_size: int = 100000,
 ):
-    """Write TileDB Array from a numpy array.
+    """Write numpy array to TileDB.
 
     Parameters
     ----------
-    tiledb_array_uri: str
-        URI for the TileDB array.
-    batch_size: int, default: 10000
+    tdb: tiledb.libtiledb.DenseArrayImpl
+        TileDB array.
+    arr: numpy.ndarray
+        Dense numpy array.
+    value_type: type
+        The type of the value, typically np.float32.
+    row_start: int, default: 0
+        The starting row in the TileDB array.
+    batch_size: int, default: 100000
         Batch size for the tiles.
     """
 
-    import numpy as np
-    import tiledb
-    from tqdm import tqdm
+    import tqdm
 
-    print(f"Configuring tiledb array: {tiledb_array_uri}")
-
-    xdimtype = np.int32
-    ydimtype = np.int32
-    value_type = np.float32
-
-    xdim = tiledb.Dim(
-        name="x", domain=(0, arr.shape[0] - 1), tile=batch_size, dtype=xdimtype
-    )
-    ydim = tiledb.Dim(
-        name="y", domain=(0, arr.shape[1] - 1), tile=arr.shape[1], dtype=ydimtype
-    )
-    dom = tiledb.Domain(xdim, ydim)
-
-    attr = tiledb.Attr(
-        name="vals",
-        dtype=value_type,
-        filters=tiledb.FilterList([tiledb.GzipFilter()]),
-    )
-
-    schema = tiledb.ArraySchema(
-        domain=dom,
-        sparse=False,
-        cell_order="row-major",
-        tile_order="row-major",
-        attrs=[attr],
-    )
-    tiledb.Array.create(tiledb_array_uri, schema)
-
-    tdbfile = tiledb.open(tiledb_array_uri, "w")
     for row in tqdm(range(0, arr.shape[0], batch_size)):
-        mat_slice = slice(row, row + batch_size)
-        sub_matrix = np.array(
-            arr[mat_slice, :].astype(value_type).tolist(), dtype=value_type
-        )
-        tdbfile[mat_slice, 0 : arr.shape[1]] = sub_matrix
+        arr_slice = slice(row, row + batch_size)
+        tdb_slice = slice(row + row_start, row + row_start + batch_size)
+        tdbfile[tdb_slice, 0 : arr.shape[1]] = arr[arr_slice, :].astype(value_type)
     tdbfile.close()
 
 
-def create_tiledb_array(
-    tiledb_array_uri: str,
-    data_list: List[str],
-    nrows: int,
-    ncols: int,
-    batch_size: int = 10000,
+def write_csr_to_tiledb(
+    tdb: "tiledb.libtiledb.SparseArrayImpl",
+    matrix: "scipy.sparse.csr_matrix",
+    value_type: type,
+    row_start: int = 0,
+    batch_size: int = 25000,
 ):
-    """Create TileDB Array from a list of numpy data files.
+    """Write csr_matrix to TileDB.
 
     Parameters
     ----------
-    tiledb_array_uri: str
-        URI for the TileDB array.
-    data_list: List[str]
-        List of data files.
-    nrows: int
-        Number of total rows
-    ncols: int
-        Number of columns, must be consistent between files
-    batch_size: int, default: 10000
+    tdb: tiledb.libtiledb.SparseArrayImpl
+        TileDB array.
+    arr: numpy.ndarray
+        Dense numpy array.
+    value_type: type
+        The type of the value, typically np.float32.
+    row_start: int, default: 0
+        The starting row in the TileDB array.
+    batch_size: int, default: 100000
         Batch size for the tiles.
     """
+    indptrs = matrix.indptr
+    indices = matrix.indices
+    data = matrix.data
 
-    import numpy as np
-    import tiledb
+    x = []
+    y = []
+    vals = []
+    for i, indptr in enumerate(indptrs):
+        if i != 0 and (i % batch_size == 0 or i == len(indptrs) - 1):
+            tdb[x, y] = vals
+            x = []
+            y = []
+            vals = []
 
-    print(f"Configuring tiledb array: {tiledb_array_uri}")
+        stop = None
+        if i != len(indptrs) - 1:
+            stop = indptrs[i + 1]
 
-    xdimtype = np.int32
-    ydimtype = np.int32
-    value_type = np.float32
+        val_slice = data[slice(indptr, stop)].astype(value_type)
+        ind_slice = indices[slice(indptr, stop)]
 
-    xdim = tiledb.Dim(
-        name="x",
-        domain=(0, nrows - 1),
-        tile=batch_size,
-        dtype=xdimtype,
-    )
-    ydim = tiledb.Dim(
-        name="y",
-        domain=(0, ncols - 1),
-        tile=ncols,
-        dtype=ydimtype,
-    )
-    dom = tiledb.Domain(xdim, ydim)
-
-    attr = tiledb.Attr(
-        name="vals",
-        dtype=value_type,
-        filters=tiledb.FilterList([tiledb.GzipFilter()]),
-    )
-
-    schema = tiledb.ArraySchema(
-        domain=dom,
-        sparse=False,
-        cell_order="row-major",
-        tile_order="row-major",
-        attrs=[attr],
-    )
-    tiledb.Array.create(tiledb_array_uri, schema)
-
-    tdbfile = tiledb.open(tiledb_array_uri, "w")
-    previous_shape = None
-    for f in data_list:
-        if previous_shape is None:
-            paging_idx = 0
-        else:
-            paging_idx += previous_shape[0]
-
-        arr = np.load(f)
-        previous_shape = arr.shape
-
-        tbd_slice = slice(paging_idx, paging_idx + arr.shape[0])
-        tdbfile[tbd_slice, 0:ncols] = arr
-    tdbfile.close()
+        x.extend([row_start + i] * len(ind_slice))
+        y.extend(ind_slice)
+        vals.extend(val_slice)
 
 
 def optimize_tiledb_array(tiledb_array_uri: str, verbose: bool = True):
@@ -736,6 +494,267 @@ def optimize_tiledb_array(tiledb_array_uri: str, verbose: bool = True):
     frags = tiledb.array_fragments(tiledb_array_uri)
     if verbose:
         print("Fragments after consolidation: {}".format(len(frags)))
+
+
+def query_tiledb_df(
+    tdb: "tiledb.libtiledb.DenseArrayImpl",
+    query_condition: str,
+    attrs: Optional[list] = None,
+) -> "pandas.DataFrame":
+    """Query TileDB DataFrame.
+
+    Parameters
+    ----------
+    tdb: tiledb.libtiledb.DenseArrayImpl
+        TileDB dataframe.
+    query_condition: str
+        Query condition.
+    attrs: list, optional, default: None
+        Columns to return in results
+    """
+
+    import re
+    import numpy as np
+
+    if attrs is not None:
+        query = tdb.query(cond=query_condition, attrs=attrs)
+    else:
+        query = tdb.query(cond=query_condition)
+    result = query.df[:]
+    re_null = re.compile(pattern="\x00")  # replace null strings with nan
+    result = result.replace(regex=re_null, value=np.nan)
+    result = result.dropna()
+
+    return result
+
+
+def pseudobulk_anndata(
+    adata: "anndata.AnnData",
+    groupby_labels: Union[str, list],
+    qc_filters: Optional[dict] = None,
+    min_num_cells: int = 1,
+    only_orig_genes: bool = False,
+):
+    """Pseudobulk an AnnData and return a new AnnData.
+
+    Parameters
+    ----------
+    adata: anndata.AnnData
+        Annotated data matrix with rows for cells and columns for genes.
+    groupby_labels: Union[str, list]
+        List of labels to groupby prior to pseudobulking.
+        For example: ["sample", "tissue", "disease", "celltype_name"]
+        will groupby these columns and perform pseudobulking based on these groups.
+    qc_filters: dict, optional, default: None
+        Dictionary containing cell filters to perform prior to pseudobulking:
+            "mito_percent": max percent of reads in mitochondrial genes
+            "min_counts": min read count for cell
+            "min_genes": min number of genes with reads for cell
+            "max_nn_dist": max nearest neighbor distance to a reference label for predicted labels.
+    min_num_cells: int, default: 1
+        The minimum number of cells in a pseudobulk in order to be considered.
+    only_orig_genes: bool, default: False
+        Account for an aligned gene space and mask non original genes to the dataset with NaN as
+        their pseudobulk. Assumes the original gene list is in adata.uns["orig_genes"].
+
+    Returns
+    -------
+    anndata.AnnData
+        A data object where pseudobulk counts are in layers["counts"] and detection rate is in
+        layers["detection"]
+
+    Examples
+    --------
+    >>> groupby_labels = ["sample", "tissue_raw", "celltype_name"]
+    >>> qc_filters = {"mito_percent": 20.0, "min_counts": 1000, "min_genes": 500, "max_nn_dist": 0.03, "max_nn_dist_col": "min_dist"}
+    >>> pseudobulk = pseudobulk_anndata(adata, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
+    """
+
+    import anndata
+    from collections import Counter
+    import numpy as np
+    import pandas as pd
+    import scanpy as sc
+    from scipy.sparse import csr_matrix
+
+    if "counts" not in adata.layers:
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+
+    if qc_filters is not None:
+        # determine prefix for mitochondrial genes
+        mito_prefix = "MT-"
+        if any(adata.var.index.str.startswith("mt-")) is True:
+            mito_prefix = "mt-"
+
+        mito_percent = qc_filters.get("mito_percent", 100.0)
+        min_counts = qc_filters.get("min_counts", None)
+        min_genes = qc_filters.get("min_genes", None)
+        max_nn_dist = qc_filters.get("max_nn_dist", 0.03)
+        max_nn_dist_col = qc_filters.get("max_nn_dist_col", "nn_dist")
+
+        adata = adata.copy()
+        adata.var["mt"] = adata.var_names.str.startswith(mito_prefix)
+        sc.pp.calculate_qc_metrics(
+            adata,
+            qc_vars=["mt"],
+            percent_top=None,
+            log1p=False,
+            inplace=True,
+            layer="counts",
+        )
+        adata = adata[adata.obs["pct_counts_mt"] <= mito_percent].copy()
+        if min_counts is not None:
+            adata = adata[adata.obs["total_counts"] >= min_counts].copy()
+        if min_genes is not None:
+            adata = adata[adata.obs["n_genes_by_counts"] >= min_genes].copy()
+        if max_nn_dist_col in adata.obs.columns:
+            adata = adata[adata.obs[max_nn_dist_col] <= max_nn_dist].copy()
+
+    df_sample = (
+        adata.obs.groupby(groupby_labels, observed=True)
+        .size()
+        .reset_index(name="cells")
+    )
+    pseudobulk = sc.get.aggregate(
+        adata, by=groupby_labels, func=["sum", "count_nonzero"], layer="counts"
+    )
+    pseudobulk.obs = pseudobulk.obs.reset_index(drop=True)
+    pseudobulk.obs = pd.merge(pseudobulk.obs, df_sample, on=groupby_labels)
+
+    pseudobulk.layers["counts"] = pseudobulk.layers["sum"].copy()
+    del pseudobulk.layers["sum"]
+    pseudobulk.layers["detection"] = (
+        pseudobulk.layers["count_nonzero"] / pseudobulk.obs["cells"].values[:, None]
+    )
+    del pseudobulk.layers["count_nonzero"]
+
+    if min_num_cells > 1:
+        pseudobulk = pseudobulk[pseudobulk.obs["cells"] >= min_num_cells].copy()
+    if only_orig_genes and "uns" in dir(adata) and "orig_genes" in adata.uns:
+        orig_genes = set(adata.uns["orig_genes"])
+        not_orig_genes_idx = [
+            i for i, x in enumerate(adata.var.index.tolist()) if x not in orig_genes
+        ]
+        pseudobulk.layers["counts"][:, not_orig_genes_idx] = np.nan
+        pseudobulk.layers["detection"][:, not_orig_genes_idx] = np.nan
+
+    return pseudobulk
+
+
+def subset_by_unique_values(
+    df: "pandas.DataFrame",
+    group_columns: Union[List[str], str],
+    value_column: str,
+    n: int,
+) -> "pandas.DataFrame":
+    """Subset a pandas dataframe to only include rows where there are at least
+    n unique values from value_column, for each grouping of group_column.
+
+    Parameters
+    ----------
+    df: "pandas.DataFrame"
+        Pandas dataframe.
+    group_columns: Union[List[str], str]
+        Columns to group by.
+    value_column: str
+        Column value from which to check the number of instances.
+    n: int
+        Minimum number of values to be included.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A subsetted dataframe.
+
+    Examples
+    --------
+    >>> df = subset_by_unique_values(df, "disease", "sample", 10)
+    """
+
+    groups = df.groupby(group_columns)[value_column].transform("nunique") >= n
+
+    return df[groups]
+
+
+def subset_by_frequency(
+    df: "pd.DataFrame",
+    group_columns: Union[List[str], str],
+    n: int,
+) -> "pd.DataFrame":
+    """Subset the DataFrame to only columns where the group appears at least n times.
+
+    Parameters
+    ----------
+    df: "pandas.DataFrame"
+        Pandas dataframe
+    group_columns: Union[List[str], str]
+        Columns to group by.
+    n: int
+        Minimum number of values to be included.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A subsetted dataframe.
+
+    Examples
+    --------
+    >>> df = subset_by_frequency(df, ["disease", "prediction"], 10)
+    """
+
+    freq = df.groupby(group_columns).size()
+    hits = freq[freq >= n].index
+
+    return df.set_index(group_columns).loc[hits].reset_index(drop=False)
+
+
+def categorize_and_sort_by_score(
+    df: "pandas.DataFrame",
+    name_column: str,
+    score_column: str,
+    ascending: bool = False,
+    topn: Optional[int] = None,
+) -> "pandas.DataFrame":
+    """Transform column into category, sort, and choose top n
+
+    Parameters
+    ----------
+    df: "pandas.DataFrame"
+        Pandas dataframe.
+    name_column: str
+        Name of column to sort.
+    score_column: str
+        Name of score column to sort name_column by.
+    ascending: bool
+        Sort ascending
+    topn: Optional[int], default: None
+        Subset to the top n diseases.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A sorted dataframe that is optionally subsetted to top n.
+
+    Examples
+    --------
+    >>> df = categorize_and_sort_by_score(df, "disease", "Hit Percentage", topn=10)
+    """
+
+    mean_scores = (
+        df.groupby(name_column)[score_column].mean().sort_values(ascending=ascending)
+    )
+    df[name_column] = df[name_column].astype("category")
+    df[name_column] = df[name_column].cat.set_categories(
+        mean_scores.index, ordered=True
+    )
+
+    if topn is not None:
+        top_values = mean_scores.head(topn).index
+        df = df[df[name_column].isin(top_values)]
+        # remove unused cats from df
+        df[name_column] = df[name_column].cat.remove_unused_categories()
+
+    return df.sort_values(name_column, ascending=ascending)
 
 
 def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
