@@ -221,7 +221,9 @@ def consolidate_duplicate_symbols(
     dup_genes_data = []
     for k in dup_genes:
         idx = [i for i, x in enumerate(adata.var.index.values) if x == k]
-        counts = csr_matrix(adata.layers["counts"][:, idx].sum(axis=1))
+        counts = csr_matrix(
+            np.array(adata.layers["counts"][:, idx].sum(axis=1)).flatten()[:, None]
+        )
         gene_data = anndata.AnnData(
             X=csr_matrix(counts.shape),
             var=pd.DataFrame(index=[k]),
