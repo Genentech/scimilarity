@@ -648,6 +648,7 @@ class CellQuery(CellSearchKNN):
         max_dist: float = 0.03,
         qc: bool = True,
         qc_params: dict = {"k_clusters": 10},
+        buffer_size: int = 100000,
         random_seed: int = 4,
     ) -> Tuple[
         "numpy.ndarray",
@@ -673,6 +674,8 @@ class CellQuery(CellSearchKNN):
         qc_params: dict, default: {'k_clusters': 10}
             Parameters for the QC:
             k_clusters: the number of clusters in kmeans clustering
+        buffer_size: int, default: 100000
+            Batch size for processing cells.
         random_seed: int, default: 1
             Random seed for k-means clustering
 
@@ -709,6 +712,7 @@ class CellQuery(CellSearchKNN):
         nn_idxs, nn_dists, metadata = self.search_exhaustive(
             centroid_embedding,
             max_dist=max_dist,
+            buffer_size=buffer_size,
         )
 
         qc_stats = {}
