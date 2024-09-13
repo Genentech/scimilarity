@@ -666,9 +666,8 @@ class CellQuery(CellSearchKNN):
             Requires a layers["counts"].
         centroid_key: str
             The obs column key that marks cells to centroid as 1, otherwise 0.
-        max_dist: float, optional
-            Assume k=1000000, then filter for cells that are within the max distance to the
-            query. Overwrites the k parameter.
+        max_dist: float, default: 0.03
+            Filter for cells that are within the max distance to the query.
         qc: bool, default: True
             Whether to perform QC on the query
         qc_params: dict, default: {'k_clusters': 10}
