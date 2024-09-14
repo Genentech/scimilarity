@@ -36,7 +36,7 @@ class CellQuery(CellSearchKNN):
         residual: bool, default: False
             Use residual connections.
         load_knn: bool, default: True
-            Load the knn index. Set to False if kNN is not needed.
+            Load the knn index. Set to False if knn is not needed.
 
         Examples
         --------
@@ -296,7 +296,7 @@ class CellQuery(CellSearchKNN):
         ef: int = None,
         max_dist: Optional[float] = None,
     ) -> Tuple[List["numpy.ndarray"], List["numpy.ndarray"], "pandas.DataFrame"]:
-        """Performs a nearest neighbors search against the kNN.
+        """Performs a nearest neighbors search against the knn.
 
         Parameters
         ----------
@@ -360,7 +360,7 @@ class CellQuery(CellSearchKNN):
 
         return nn_idxs, nn_dists, metadata
 
-    def search_centroid_kNN(
+    def search_centroid_nearest(
         self,
         adata: "anndata.AnnData",
         centroid_key: str,
@@ -421,7 +421,7 @@ class CellQuery(CellSearchKNN):
         --------
         >>> cells_used_in_query = adata.obs["celltype_name"] == "macrophage"
         >>> adata.obs["used_in_query"] = cells_used_in_query.astype(int)
-        >>> centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats = cq.search_centroid_kNN(adata, 'used_in_query')
+        >>> centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats = cq.search_centroid_nearest(adata, 'used_in_query')
         """
 
         import numpy as np
@@ -460,7 +460,7 @@ class CellQuery(CellSearchKNN):
 
         return centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats
 
-    def search_cluster_centroids_kNN(
+    def search_cluster_centroids_nearest(
         self,
         adata: "anndata.AnnData",
         cluster_key: str,
@@ -476,7 +476,7 @@ class CellQuery(CellSearchKNN):
         Dict[str, "numpy.ndarray"],
         "pandas.DataFrame",
     ]:
-        """Performs a nearest neighbors search for cluster centroids against the kNN.
+        """Performs a nearest neighbors search for cluster centroids against the knn.
 
         Parameters
         ----------
@@ -516,7 +516,7 @@ class CellQuery(CellSearchKNN):
 
         Examples
         --------
-        >>> centroid_embeddings, cluster_idx, nn_idx, nn_dists, all_metadata = cq.search_cluster_centroids_kNN(adata, "leidan")
+        >>> centroid_embeddings, cluster_idx, nn_idx, nn_dists, all_metadata = cq.search_cluster_centroids_nearest(adata, "leidan")
         """
 
         from .utils import get_cluster_centroids
@@ -646,6 +646,7 @@ class CellQuery(CellSearchKNN):
         adata: "anndata.AnnData",
         centroid_key: str,
         max_dist: float = 0.03,
+        metadata_filter: Optional[dict] = None,
         qc: bool = True,
         qc_params: dict = {"k_clusters": 10},
         buffer_size: int = 100000,
@@ -668,6 +669,9 @@ class CellQuery(CellSearchKNN):
             The obs column key that marks cells to centroid as 1, otherwise 0.
         max_dist: float, default: 0.03
             Filter for cells that are within the max distance to the query.
+        metadata_filter: dict, optional, default: None
+            A dictionary where keys represent column names and values
+            represent valid terms in the columns.
         qc: bool, default: True
             Whether to perform QC on the query
         qc_params: dict, default: {'k_clusters': 10}
@@ -711,6 +715,7 @@ class CellQuery(CellSearchKNN):
         nn_idxs, nn_dists, metadata = self.search_exhaustive(
             centroid_embedding,
             max_dist=max_dist,
+            metadata_filter=metadata_filter,
             buffer_size=buffer_size,
         )
 
@@ -728,3 +733,94 @@ class CellQuery(CellSearchKNN):
             qc_stats["query_coherence"] = np.mean(query_overlap)
 
         return centroid_embedding, nn_idxs, nn_dists, metadata, qc_stats
+
+    def search_cluster_centroids_exhaustive(
+        self,
+        adata: "anndata.AnnData",
+        cluster_key: str,
+        cluster_label: Optional[str] = None,
+        max_dist: float = 0.03,
+        metadata_filter: Optional[dict] = None,
+        buffer_size: int = 100000,
+        skip_null: bool = True,
+    ) -> Tuple[
+        "numpy.ndarray",
+        list,
+        Dict[str, "numpy.ndarray"],
+        Dict[str, "numpy.ndarray"],
+        "pandas.DataFrame",
+    ]:
+        """Performs a nearest neighbors search for cluster centroids against the knn.
+
+        Parameters
+        ----------
+        adata: anndata.AnnData
+            Annotated data matrix with rows for cells and columns for genes.
+            Requires a layers["counts"].
+        cluster_key: str
+            The obs column key that contains cluster labels.
+        cluster_label: str, optional, default: None
+            The cluster label of interest. If None, then get the centroids of
+            all clusters, otherwise get only the centroid for the cluster
+            of interest
+        max_dist: float, default: 0.03
+            Filter for cells that are within the max distance to the query.
+        metadata_filter: dict, optional, default: None
+            A dictionary where keys represent column names and values
+            represent valid terms in the columns.
+        buffer_size: int, default: 100000
+            Batch size for processing cells.
+        skip_null: bool, default: True
+            Whether to skip cells with null/nan cluster labels.
+
+        Returns
+        -------
+        centroid_embeddings: numpy.ndarray
+            A 2D numpy array of the log normalized (1e4) cluster centroid embeddings.
+        cluster_idx: list
+            A list of cluster labels corresponding to the order returned in centroids.
+        nn_idxs: Dict[str, numpy.ndarray]
+            A 2D numpy array of nearest neighbor indices [num_cells x k].
+        nn_dists: Dict[str, numpy.ndarray]
+            A 2D numpy array of nearest neighbor distances [num_cells x k].
+        all_metadata: pandas.DataFrame
+            A pandas dataframe containing cell metadata for nearest neighbors
+            for all centroids.
+
+        Examples
+        --------
+        >>> centroid_embeddings, cluster_idx, nn_idx, nn_dists, all_metadata = cq.search_cluster_centroids_exhaustive(adata, "leidan")
+        """
+
+        from .utils import get_cluster_centroids
+
+        centroids, cluster_idx = get_cluster_centroids(
+            adata, self.gene_order, cluster_key, cluster_label, skip_null=skip_null
+        )
+
+        centroid_embeddings = self.get_embeddings(centroids)
+
+        nn_idxs, nn_dists, metadata = self.search_exhaustive(
+            centroid_embeddings,
+            max_dist=max_dist,
+            metadata_filter=metadata_filter,
+            buffer_size=buffer_size,
+        )
+
+        metadata["centroid"] = metadata["embedding_idx"].map(
+            {i: x for i, x in enumerate(cluster_idx)}
+        )
+
+        nn_idxs_dict = {}
+        nn_dists_dict = {}
+        for i in range(len(cluster_idx)):
+            nn_idxs_dict[cluster_idx[i]] = [nn_idxs[i]]
+            nn_dists_dict[cluster_idx[i]] = [nn_dists[i]]
+
+        return (
+            centroid_embeddings,
+            cluster_idx,
+            nn_idxs_dict,
+            nn_dists_dict,
+            metadata,
+        )

@@ -4,7 +4,7 @@ from .cell_search_knn import CellSearchKNN
 
 
 class CellAnnotation(CellSearchKNN):
-    """A class that annotates cells using a cell embedding and then kNN search."""
+    """A class that annotates cells using a cell embedding and then knn search."""
 
     def __init__(
         self,
@@ -72,7 +72,7 @@ class CellAnnotation(CellSearchKNN):
         self.safelist = None
         self.blocklist = None
 
-    def build_kNN(
+    def build_knn(
         self,
         input_data: Union["anndata.AnnData", List[str]],
         knn_filename: str = "labelled_kNN.bin",
@@ -82,7 +82,7 @@ class CellAnnotation(CellSearchKNN):
         M: int = 80,
         target_labels: Optional[List[str]] = None,
     ):
-        """Build and save a kNN index from a h5ad data file or directory of aligned.zarr stores.
+        """Build and save a knn index from a h5ad data file or directory of aligned.zarr stores.
 
         Parameters
         ----------
@@ -92,7 +92,7 @@ class CellAnnotation(CellSearchKNN):
             Otherwise, the annotated data matrix with rows for cells and columns for genes.
             NOTE: The data should be curated to only contain valid cell ontology labels.
         knn_filename: str, default: "labelled_kNN.bin"
-            Filename of the kNN index.
+            Filename of the knn index.
         celltype_labels_filename: str, default: "reference_labels.tsv"
             Filename of the cell type reference labels.
         obs_field: str, default: "celltype_name"
@@ -184,12 +184,12 @@ class CellAnnotation(CellSearchKNN):
         with open(celltype_labels_fullpath, "r") as fh:
             self.idx2label = {i: line.strip() for i, line in enumerate(fh)}
 
-    def reset_kNN(self):
-        """Reset the kNN such that nothing is marked deleted.
+    def reset_knn(self):
+        """Reset the knn such that nothing is marked deleted.
 
         Examples
         --------
-        >>> ca.reset_kNN()
+        >>> ca.reset_knn()
         """
 
         self.blocklist = None
@@ -223,7 +223,7 @@ class CellAnnotation(CellSearchKNN):
         self.blocklist = set(labels)
         self.safelist = None
 
-        self.reset_kNN()
+        self.reset_knn()
         for i, celltype_name in self.idx2label.items():
             if celltype_name in self.blocklist:
                 self.knn.mark_deleted(i)  # mark blocklist
@@ -258,7 +258,7 @@ class CellAnnotation(CellSearchKNN):
             if celltype_name in self.safelist:
                 self.knn.unmark_deleted(i)  # unmark safelist
 
-    def get_predictions_kNN(
+    def get_predictions_knn(
         self,
         embeddings: "numpy.ndarray",
         k: int = 50,
@@ -266,7 +266,7 @@ class CellAnnotation(CellSearchKNN):
         weighting: bool = False,
         disable_progress: bool = False,
     ) -> Tuple["numpy.ndarray", "numpy.ndarray", "numpy.ndarray", "pandas.DataFrame"]:
-        """Get predictions from kNN search results.
+        """Get predictions from knn search results.
 
         Parameters
         ----------
@@ -305,7 +305,7 @@ class CellAnnotation(CellSearchKNN):
         --------
         >>> ca = CellAnnotation(model_path="/opt/data/model")
         >>> embeddings = ca.get_embeddings(align_dataset(data, ca.gene_order).X)
-        >>> predictions, nn_idxs, nn_dists, stats = ca.get_predictions_kNN(embeddings)
+        >>> predictions, nn_idxs, nn_dists, stats = ca.get_predictions_knn(embeddings)
         """
 
         from collections import defaultdict
@@ -418,7 +418,7 @@ class CellAnnotation(CellSearchKNN):
         embeddings = self.get_embeddings(align_dataset(data, self.gene_order).X)
         data.obsm["X_scimilarity"] = embeddings
 
-        predictions, _, _, nn_stats = self.get_predictions_kNN(embeddings)
+        predictions, _, _, nn_stats = self.get_predictions_knn(embeddings)
         data.obs["celltype_hint"] = predictions.values
         data.obs["min_dist"] = nn_stats["min_dist"].values
         data.obs["celltype_hits"] = nn_stats["hits"].values
