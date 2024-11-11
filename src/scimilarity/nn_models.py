@@ -113,9 +113,11 @@ class Encoder(nn.Module):
         """
 
         if not use_gpu:
-            ckpt = torch.load(filename, map_location=torch.device("cpu"))
+            ckpt = torch.load(
+                filename, map_location=torch.device("cpu"), weights_only=False
+            )
         else:
-            ckpt = torch.load(filename)
+            ckpt = torch.load(filename, weights_only=False)
         self.load_state_dict(ckpt["state_dict"])
 
 
@@ -218,7 +220,9 @@ class Decoder(nn.Module):
         """
 
         if not use_gpu:
-            ckpt = torch.load(filename, map_location=torch.device("cpu"))
+            ckpt = torch.load(
+                filename, map_location=torch.device("cpu"), weights_only=False
+            )
         else:
-            ckpt = torch.load(filename)
+            ckpt = torch.load(filename, weights_only=False)
         self.load_state_dict(ckpt["state_dict"])

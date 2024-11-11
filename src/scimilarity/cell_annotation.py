@@ -10,9 +10,7 @@ class CellAnnotation(CellSearchKNN):
         self,
         model_path: str,
         use_gpu: bool = False,
-        parameters: Optional[dict] = None,
         filenames: Optional[dict] = None,
-        residual: bool = False,
     ):
         """Constructor.
 
@@ -22,12 +20,8 @@ class CellAnnotation(CellSearchKNN):
             Path to the directory containing model files.
         use_gpu: bool, default: False
             Use GPU instead of CPU.
-        parameters: dict, optional, default: None
-            Use a dictionary of custom model parameters instead of infering from model files.
         filenames: dict, optional, default: None
-            Use a dictionary of custom filenames for model files instead default.
-        residual: bool, default: False
-            Use residual connections.
+            Use a dictionary of custom filenames for files instead default.
 
         Examples
         --------
@@ -39,16 +33,13 @@ class CellAnnotation(CellSearchKNN):
         super().__init__(
             model_path=model_path,
             use_gpu=use_gpu,
-            parameters=parameters,
-            filenames=filenames,
-            residual=residual,
         )
-
-        if filenames is None:
-            filenames = {}
 
         self.annotation_path = os.path.join(model_path, "annotation")
         os.makedirs(self.annotation_path, exist_ok=True)
+
+        if filenames is None:
+            filenames = {}
 
         self.filenames["knn"] = os.path.join(
             self.annotation_path, filenames.get("knn", "labelled_kNN.bin")
@@ -220,10 +211,10 @@ class CellAnnotation(CellSearchKNN):
         >>> ca.blocklist_celltypes(["T cell"])
         """
 
+        self.reset_knn()
         self.blocklist = set(labels)
         self.safelist = None
 
-        self.reset_knn()
         for i, celltype_name in self.idx2label.items():
             if celltype_name in self.blocklist:
                 self.knn.mark_deleted(i)  # mark blocklist
@@ -321,9 +312,10 @@ class CellAnnotation(CellSearchKNN):
             embeddings=embeddings, k=k, ef=ef
         )
         end_time = time.time()
-        print(
-            f"Get nearest neighbors finished in: {float(end_time - start_time) / 60} min"
-        )
+        if not disable_progress:
+            print(
+                f"Get nearest neighbors finished in: {float(end_time - start_time) / 60} min"
+            )
         stats = {
             "hits": [],
             "hits_weighted": [],
@@ -345,8 +337,10 @@ class CellAnnotation(CellSearchKNN):
                 celltype = defaultdict(float)
                 celltype_weighted = defaultdict(float)
                 for neighbor, dist in zip(nns, d_nns):
-                    celltype[self.idx2label[neighbor]] += 1
-                    celltype_weighted[self.idx2label[neighbor]] += 1 / max(dist, 1e-6)
+                    celltype[self.idx2label[neighbor]] += 1.0
+                    celltype_weighted[self.idx2label[neighbor]] += 1.0 / float(
+                        max(dist, 1e-6)
+                    )
                 # predict based on consensus max occurrence
                 if weighting:
                     predictions.append(

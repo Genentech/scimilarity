@@ -10,11 +10,9 @@ class CellQuery(CellSearchKNN):
         self,
         model_path: str,
         use_gpu: bool = False,
-        parameters: Optional[dict] = None,
         filenames: Optional[dict] = None,
         metadata_tiledb_uri: str = "cell_metadata",
         embedding_tiledb_uri: str = "cell_embedding",
-        residual: bool = False,
         load_knn: bool = True,
     ):
         """Constructor.
@@ -25,16 +23,12 @@ class CellQuery(CellSearchKNN):
             Path to the model directory.
         use_gpu: bool, default: False
             Use GPU instead of CPU.
-        parameters: dict, optional, default: None
-            Use a dictionary of custom model parameters instead of infering from model files.
         filenames: dict, optional, default: None
             Use a dictionary of custom filenames for model files instead default.
         metadata_tiledb_uri: str, default: "cell_metadata"
             Relative path to the directory containing the tiledb cell metadata storage.
         embedding_tiledb_uri: str, default: "cell_embedding"
             Relative path to the directory containing the tiledb cell embedding storage.
-        residual: bool, default: False
-            Use residual connections.
         load_knn: bool, default: True
             Load the knn index. Set to False if knn is not needed.
 
@@ -51,11 +45,10 @@ class CellQuery(CellSearchKNN):
         super().__init__(
             model_path=model_path,
             use_gpu=use_gpu,
-            parameters=parameters,
-            filenames=filenames,
-            residual=residual,
         )
+
         self.cellsearch_path = os.path.join(model_path, "cellsearch")
+        os.makedirs(self.cellsearch_path, exist_ok=True)
 
         if filenames is None:
             filenames = {}
@@ -105,7 +98,7 @@ class CellQuery(CellSearchKNN):
                 cell_metadata[c] = cell_metadata[c].replace("NA", np.nan)
             cell_metadata = cell_metadata.astype(convert_dict)
             tiledb.from_pandas(metadata_tiledb_uri, cell_metadata)
-        self.cell_metadata = tiledb.open_dataframe(metadata_tiledb_uri)
+        self.cell_metadata = tiledb.open(metadata_tiledb_uri, "r").df[:]
 
         # get cell embeddings: create tiledb storage if it does not exist
         embedding_tiledb_uri = os.path.join(self.cellsearch_path, embedding_tiledb_uri)
@@ -599,6 +592,9 @@ class CellQuery(CellSearchKNN):
         import pandas as pd
         from scipy.spatial.distance import cdist
 
+        if embeddings.ndim == 1:
+            embeddings = embeddings.reshape(1, -1)
+
         nn_idxs = [[] for _ in range(embeddings.shape[0])]
         nn_dists = [[] for _ in range(embeddings.shape[0])]
         n_cells = self.cell_metadata.shape[0]
@@ -624,7 +620,7 @@ class CellQuery(CellSearchKNN):
 
         # sort by lowest distance
         for row in range(len(nn_idxs)):
-            nn_idxs[row] = np.hstack(nn_idxs[0])
+            nn_idxs[row] = np.hstack(nn_idxs[row])
             nn_dists[row] = np.hstack(nn_dists[row])
             sorted_indices = np.argsort(nn_dists[row])
             nn_idxs[row] = nn_idxs[row][sorted_indices]
