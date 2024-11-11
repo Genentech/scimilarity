@@ -1,5 +1,6 @@
 import networkx as nx
 import obonet
+import pandas as pd
 from typing import Union, Tuple, List
 
 
@@ -325,6 +326,47 @@ def get_lowest_common_ancestor(graph, node1, node2) -> nx.DiGraph:
     return nx.algorithms.lowest_common_ancestors.lowest_common_ancestor(
         graph, node1, node2
     )
+
+
+def find_most_viable_parent(graph, node, node_list):
+    """Get most viable parent of a given node among the node_list.
+
+    Parameters
+    ----------
+    graph: networkx.DiGraph
+        Node graph.
+    node: str
+        ID of given node.
+    node_list: list, set, optional, default: None
+        A restricted node list for filtering.
+
+    Returns
+    -------
+    networkx.DiGraph
+        Node graph of parents.
+
+    Examples
+    --------
+    >>> coarse_grained = find_most_viable_parent(onto, id, celltype_list)
+    """
+
+    parents = get_parents(graph, node, node_list=node_list)
+    if len(parents) == 0:
+        coarse_grained = None
+        all_parents = list(get_parents(graph, node))
+        if len(all_parents) == 1:
+            grandparents = get_parents(graph, all_parents[0], node_list=node_list)
+            if len(grandparents) == 1:
+                (coarse_grained,) = grandparents
+    elif len(parents) == 1:
+        (coarse_grained,) = parents
+    else:
+        for parent in list(parents):
+            coarse_grained = None
+            if get_all_ancestors(graph, parent, node_list=pd.Index(parents)):
+                coarse_grained = parent
+                break
+    return coarse_grained
 
 
 def ontology_similarity(graph, node1, node2, restricted_set=None) -> int:
