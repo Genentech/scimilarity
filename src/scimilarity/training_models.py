@@ -658,7 +658,7 @@ class MetricLearning(pl.LightningModule):
             meta_data["cell_tdb_uri"] = self.trainer.datamodule.cell_tdb_uri
             meta_data["gene_tdb_uri"] = self.trainer.datamodule.gene_tdb_uri
             meta_data["counts_tdb_uri"] = self.trainer.datamodule.counts_tdb_uri
-            self.trainer.datamodule.data_df.to_csv(
+            self.trainer.datamodule.train_df.to_csv(
                 os.path.join(model_path, "train_cells.csv")
             )
             if self.trainer.datamodule.val_df is not None:
@@ -669,7 +669,7 @@ class MetricLearning(pl.LightningModule):
             with open(os.path.join(model_path, "reference_labels.tsv"), "w") as f:
                 f.write(
                     "\n".join(
-                        self.trainer.datamodule.data_df["cellTypeName"].values.tolist()
+                        self.trainer.datamodule.train_df["cellTypeName"].values.tolist()
                     )
                 )
         with open(os.path.join(model_path, "metadata.json"), "w") as f:
