@@ -468,7 +468,14 @@ def write_csr_to_tiledb(
         vals.extend(val_slice)
 
 
-def optimize_tiledb_array(tiledb_array_uri: str, verbose: bool = True):
+def optimize_tiledb_array(
+    tiledb_array_uri: str,
+    steps=100000,
+    step_max_frags: int = 10,
+    buffer_size: int = 1000000000,  # 1GB
+    total_budget: int = 200000000000,  # 200GB
+    verbose: bool = True,
+):
     """Optimize TileDB Array.
 
     Parameters
@@ -489,8 +496,11 @@ def optimize_tiledb_array(tiledb_array_uri: str, verbose: bool = True):
         print("Fragments before consolidation: {}".format(len(frags)))
 
     cfg = tiledb.Config()
-    cfg["sm.consolidation.step_min_frags"] = 1
-    cfg["sm.consolidation.step_max_frags"] = 200
+    cfg["sm.consolidation.steps"] = steps
+    cfg["sm.consolidation.step_min_frags"] = 2
+    cfg["sm.consolidation.step_max_frags"] = step_max_frags
+    cfg["sm.consolidation.buffer_size"] = buffer_size
+    cfg["sm.mem.total_budget"] = total_budget
     tiledb.consolidate(tiledb_array_uri, config=cfg)
     tiledb.vacuum(tiledb_array_uri)
 
@@ -578,7 +588,6 @@ def pseudobulk_anndata(
     import numpy as np
     import pandas as pd
     import scanpy as sc
-    from scipy.sparse import csr_matrix
 
     if "counts" not in adata.layers:
         raise ValueError(f"Raw counts matrix not found in layers['counts'].")
@@ -785,8 +794,10 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "Fat",
             "omental fat pad",
             "white adipose tissue",
+            "subcutaneous adipose tissue",
+            "visceral fat",
         },
-        "adrenal gland": {"adrenal gland", "visceral fat"},
+        "adrenal gland": {"adrenal gland"},
         "airway": {
             "trachea",
             "trachea;bronchus",
@@ -798,11 +809,45 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "inferior nasal concha",
             "nose",
             "nasal turbinal",
+            "respiratory airway",
+            "trachea;respiratory airway",
+            "bronchial epithelial cell",
+            "tonsil",
+            "dental pulp",
+            "gingiva",
+            "olfactory epithelium",
+            "periodontium",
+            "nasal cavity",
         },
-        "bone": {"bone", "bone tissue", "head of femur", "synovial fluid"},
-        "bladder": {"urinary bladder", "Bladder", "bladder"},
-        "blood": {"blood", "umbilical cord blood", "peripheral blood", "Blood"},
-        "bone marrow": {"bone marrow", "Bone_Marrow"},
+        "biliary system": {
+            "bile duct",
+            "mucosa of gallbladder",
+        },
+        "bladder": {
+            "urinary bladder",
+            "Bladder",
+            "bladder",
+            "urothelium",
+            "ureter",
+            "urine",
+        },
+        "blood": {
+            "blood",
+            "umbilical cord blood",
+            "peripheral blood",
+            "Blood",
+            "venous blood",
+        },
+        "bone": {
+            "bone",
+            "bone tissue",
+            "head of femur",
+            "bone spine",
+        },
+        "bone marrow": {
+            "bone marrow",
+            "Bone_Marrow",
+        },
         "brain": {
             "brain",
             "cortex",
@@ -819,16 +864,56 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "brain white matter",
             "cerebellum",
             "hypothalamus",
+            "dorsal root ganglion",
+            "Brodmann (1909) area 9",
+            "choroid plexus",
+            "striatum",
+            "dorsolateral prefrontal cortex",
+            "putamen",
+            "middle temporal gyrus",
+            "frontal cortex",
+            "substantia nigra",
+            "primary somatosensory cortex",
+            "temporal cortex",
+            "primary visual cortex",
+            "central nervous system",
         },
-        "breast": {"breast", "Mammary", "mammary gland"},
+        "breast": {
+            "breast",
+            "Mammary",
+            "mammary gland",
+            "upper outer quadrant of breast",
+        },
+        "ear": {"tympanic membrane"},
+        # "embryo": {
+        #     "amniotic fluid",
+        #     "embryo",
+        #     "blastocyst",
+        #     "yolk sac",
+        #     "ureteric bud",
+        #     "placenta",
+        # },
         "esophagus": {
             "esophagus",
             "esophagusmucosa",
             "esophagusmuscularis",
             "esophagus mucosa",
             "esophagus muscularis mucosa",
+            "epithelium of esophagus",
         },
-        "eye": {"eye", "uvea", "corneal epithelium", "retina", "Eye"},
+        "eye": {
+            "eye",
+            "uvea",
+            "corneal epithelium",
+            "retina",
+            "Eye",
+            "sclera",
+            "lacrimal gland",
+            "macula lutea proper",
+            "peripheral region of retina",
+            "fovea centralis",
+            "pigment epithelium of eye",
+        },
         "stomach": {"stomach"},
         "gut": {
             "colon",
@@ -848,6 +933,9 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "jejunum",
             "jejunum ",
             "descending colon",
+            "rectum",
+            "colonic mucosa",
+            "mucosa of descending colon",
         },
         "heart": {
             "heart",
@@ -856,6 +944,19 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "Heart",
             "heart left ventricle",
             "pulmonary artery",
+            "cardiac ventricle",
+            "heart right ventricle",
+            "left cardiac atrium",
+            "right cardiac atrium",
+            "apex of heart",
+            "interventricular septum",
+        },
+        "joint": {
+            "synovial fluid",
+            "cartilage tissue",
+            "portion of cartilage tissue in tibia",
+            "layer of synovial tissue",
+            "synovial membrane of synovial joint",
         },
         "kidney": {
             "adult mammalian kidney",
@@ -863,14 +964,23 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "Kidney",
             "inner medulla of kidney",
             "outer cortex of kidney",
+            "renal medulla",
+            "cortex of kidney",
+            "renal pelvis",
+            "kidney blood vessel",
+            "renal papilla",
         },
-        "liver": {"liver", "Liver", "caudate lobe of liver"},
+        "liver": {
+            "liver",
+            "Liver",
+            "caudate lobe of liver",
+            "right lobe of liver",
+            "left lobe of liver",
+        },
         "lung": {
             "lung",
             "alveolar system",
             "lung parenchyma",
-            "respiratory airway",
-            "trachea;respiratory airway",
             "BAL",
             "Lung",
             "Parenchymal lung tissue",
@@ -879,12 +989,21 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "Intermediate",
             "lower lobe of lung",
             "upper lobe of lung",
+            "upper lobe of left lung",
+            "upper lobe of right lung",
+            "lower lobe of right lung",
+            "lower lobe of left lung",
+            "left lung",
+            "right lung",
+            "lingula of left lung",
         },
         "lymph node": {
             "lymph node",
             "axillary lymph node",
             "Lymph_Node",
             "craniocervical lymph node",
+            "thoracic lymph node",
+            "mesenteric lymph node",
         },
         "male reproduction": {
             "male reproductive gland",
@@ -894,6 +1013,8 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "Prostate",
             "prostate",
             "peripheral zone of prostate",
+            "transition zone of prostate;urethra",
+            "transition zone of prostate",
         },
         "female reproduction": {
             "ovary",
@@ -906,7 +1027,21 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "uterus",
             "Uterus",
         },
-        "pancreas": {"pancreas", "Pancreas", "islet of Langerhans"},
+        "muscle": {
+            "psoas muscle",
+            "muscle tissue",
+            "gastrocnemius",
+        },
+        "pancreas": {
+            "pancreas",
+            "Pancreas",
+            "islet of Langerhans",
+            "exocrine pancreas",
+        },
+        "peritoneum": {
+            "peritoneum",
+            "pleural effusion",
+        },
         "skin": {
             "skin of body",
             "skin epidermis",
@@ -914,22 +1049,32 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "scrotum skin",
             "Skin",
             "skin",
+            "skin of leg",
+            "zone of skin",
         },
-        "spleen": {"spleen", "Spleen"},
-        "thymus": {"thymus", "Thymus"},
+        "spleen": {
+            "spleen",
+            "Spleen",
+        },
+        "thymus": {
+            "thymus",
+            "Thymus",
+        },
         "vasculature": {
             "vasculature",
             "mesenteric artery",
             "umbilical vein",
             "Vasculature",
+            "carotid artery segment",
+            "posterior vena cava",
         },
     }
     term2simple = {}
     for tissue_simplified, children in tissue_mapper.items():
         for child in children:
-            term2simple[child] = tissue_simplified
+            term2simple[child.lower()] = tissue_simplified
 
-    return tissues.map(term2simple)
+    return tissues.str.lower().map(term2simple)
 
 
 def clean_diseases(diseases: "pandas.Series") -> "pandas.Series":
@@ -952,12 +1097,8 @@ def clean_diseases(diseases: "pandas.Series") -> "pandas.Series":
 
     disease_mapper = {
         "healthy": {"healthy", "", "NA"},
-        "Alzheimer's": {
-            "Alzheimer's disease",
-        },
-        "COVID-19": {
-            "COVID-19",
-        },
+        "Alzheimer's": {"Alzheimer's disease"},
+        "COVID-19": {"COVID-19"},
         "ILD": {
             "pulmonary fibrosis",
             "idiopathic pulmonary fibrosis",
@@ -965,6 +1106,7 @@ def clean_diseases(diseases: "pandas.Series") -> "pandas.Series":
             "systemic scleroderma;interstitial lung disease",
             "fibrosis",
             "hypersensitivity pneumonitis",
+            "Idiopathic pulmonary arterial hypertension",
         },
         "cancer": {
             "head and neck squamous cell carcinoma",
@@ -978,47 +1120,100 @@ def clean_diseases(diseases: "pandas.Series") -> "pandas.Series":
             "melanoma",
             "multiple myeloma",
             "Gastrointestinal stromal tumor",
-            "neuroblastoma" "nasopharyngeal neoplasm",
             "adenocarcinoma",
             "pancreatic ductal adenocarcinoma",
             "chronic lymphocytic leukemia",
             "Uveal Melanoma",
             "Myelofibrosis",
+            "acute myeloid leukemia",
+            "acute lymphoblastic leukemia",
+            "precursor B-cell acute lymphoblastic leukemia",
+            "T-cell acute lymphoblastic leukemia",
+            "chronic myelogenous leukemia",
+            "B-cell lymphoma",
+            "precursor T-cell lymphoblastic leukemia-lymphoma",
+            "human papilloma virus infection;head and neck squamous cell carcinoma",
+            "squamous cell carcinoma",
+            "Tonsillar Squamous Cell Carcinoma",
+            "invasive breast ductal carcinoma",
+            "basal cell carcinoma",
+            "brain glioblastoma;non-small cell lung carcinoma",
+            "renal cell carcinoma",
+            "non-small cell lung carcinoma",
+            "colorectal cancer",
+            "esophageal carcinoma",
+            "liver neoplasm;Uveal Melanoma",
+            "glioblastoma multiforme",
+            "Ewing sarcoma",
+            "medulloblastoma",
+            "brain glioblastoma",
+            "breast neoplasm",
+            "lung adenocarcinoma",
+            "lung cancer",
+            "nasopharyngeal neoplasm",
+            "small cell lung carcinoma",
+            "breast cancer",
+            "prostate cancer",
+            "gastric cancer",
+            "gastric carcinoma",
+            "bladder carcinoma",
+            "urinary bladder cancer",
+            "Pleuropulmonary blastoma",
+            "cutaneous squamous cell carcinoma",
+            "Merkel cell skin cancer",
+            "urothelial neoplasm",
+            "alveolar rhabdomyosarcoma",
+            "myeloid neoplasm",
+            "Sezary's disease",
+            "essential thrombocythemia",
         },
-        "MS": {
-            "multiple sclerosis",
-        },
-        "dengue": {
-            "dengue disease",
+        "MS": {"multiple sclerosis"},
+        "dengue": {"dengue disease"},
+        "HIV": {
+            "HIV enteropathy",
+            "HIV infection",
         },
         "IBD": {
             "Crohn's disease",
+            "ulcerative colitis",
         },
         "SLE": {"systemic lupus erythematosus"},
         "scleroderma": {"scleroderma"},
         "LCH": {"Langerhans Cell Histiocytosis"},
-        "NAFLD": {"non-alcoholic fatty liver disease"},
+        "NAFLD": {"non-alcoholic fatty liver disease", "non-alcoholic steatohepatitis"},
         "Kawasaki disease": {"mucocutaneous lymph node syndrome"},
         "eczema": {"atopic eczema"},
         "sepsis": {"septic shock"},
         "obesity": {"obesity"},
         "DRESS": {"drug hypersensitivity syndrome"},
         "hidradenitis suppurativa": {"hidradenitis suppurativa"},
-        "T2 diabetes": {"type II diabetes mellitus"},
-        "non-alcoholic steatohepatitis": {"non-alcoholic steatohepatitis"},
-        "Biliary atresia": {"Biliary atresia"},
-        "essential thrombocythemia": {"essential thrombocythemia"},
-        "HIV": {"HIV enteropathy"},
+        "diabetes": {
+            "type II diabetes mellitus",
+            "type 2 diabetes mellitus",
+            "diabetes mellitus",
+            "Wolfram syndrome",
+        },
+        "biliary atresia": {"Biliary atresia"},
         "monoclonal gammopathy": {"monoclonal gammopathy"},
         "psoriatic arthritis": {"psoriatic arthritis"},
         "RA": {"rheumatoid arthritis"},
         "osteoarthritis": {"osteoarthritis"},
         "periodontitis": {"periodontitis"},
-        "Lymphangioleiomyomatosis": {"Lymphangioleiomyomatosis"},
+        "LAM": {"Lymphangioleiomyomatosis"},
+        "Parkinson's": {
+            "Parkinson's disease",
+            "Parkinson's Disease",
+        },
+        "cardiomyopathy": {
+            "cardiomyopathy",
+            "arrhythmogenic right ventricular cardiomyopathy",
+            "dilated cardiomyopathy",
+        },
     }
+
     term2simple = {}
     for disease_simplified, children in disease_mapper.items():
         for child in children:
-            term2simple[child] = disease_simplified
+            term2simple[child.lower()] = disease_simplified
 
-    return diseases.map(term2simple)
+    return diseases.str.lower().map(term2simple)
