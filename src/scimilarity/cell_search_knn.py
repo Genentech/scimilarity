@@ -10,9 +10,6 @@ class CellSearchKNN(CellEmbedding):
         self,
         model_path: str,
         use_gpu: bool = False,
-        parameters: Optional[dict] = None,
-        filenames: Optional[dict] = None,
-        residual: bool = False,
     ):
         """Constructor.
 
@@ -22,30 +19,16 @@ class CellSearchKNN(CellEmbedding):
             Path to the directory containing model files.
         use_gpu: bool, default: False
             Use GPU instead of CPU.
-        parameters: dict, optional, default: None
-            Use a dictionary of custom model parameters instead of infering from model files.
-        filenames: dict, optional, default: None
-            Use a dictionary of custom filenames for model files instead default.
-            The kNN filenames also need to be specified here.
-        residual: bool, default: False
-            Use residual connections.
 
         Examples
         --------
-        >>> filenames = {"knn": "knn.bin"}
-        >>> cs = CellSearch(model_path="/opt/data/model", filenames=filesnames)
+        >>> cs = CellSearchKNN(model_path="/opt/data/model")
         """
 
         super().__init__(
             model_path=model_path,
             use_gpu=use_gpu,
-            parameters=parameters,
-            filenames=filenames,
-            residual=residual,
         )
-
-        if filenames is None:
-            filenames = {}
 
         self.knn = None
         self.safelist = None
