@@ -1,16 +1,18 @@
 Release Notes
-===============================================================================
+================================================================================
 
-Version 0.3.0 pre-release notes:  September 11, 2024
--------------------------------------------------------------------------------
+Version 0.3.0 pre-release notes:  November 11, 2024
+--------------------------------------------------------------------------------
 
 General:
-  + Various changes to utility functions to improve efficiency.
+  + Various changes to utility functions to improve efficiency and flexibility.
+  + Simplification of many class constructor parameters.
   + Tutorials have been updated with new download links and analyses.
 
 Exhaustive queries:
-  + Functionality to perform exhaustive queries has been added as the new
-    method ``cell_query.search_exhaustive``.
+  + Functionality to perform exhaustive queries has been added as new methods
+    ``cell_query.search_exhaustive``, ``cell_query.search_centroid_exhaustive``,
+    and ``cell_query.search_cluster_centroids_exhaustive``.
   + The kNN query method ``cell_query.search`` has been renamed to
     ``cell_query.search_nearest``.
 
@@ -28,16 +30,18 @@ Query result filtering and interpretation:
     using the ``metadata_filter`` argument to ``cell_query.search_exhaustive``.
   + Results from exhaustive queries can be constrained by distance-to-query
     using the ``max_dist`` argument to ``cell_query.search_exhaustive``.
+  + The mappings in ``utils.clean_tissues`` and ``utils.clean_diseases`` have
+    been expanded.
 
 Optimizations to training:
-  + The ASW and NMSE training evaluation metrics were added to multiple
-    methods.
+  + The ASW and NMSE training evaluation metrics were added.
   + The ``triplet_selector.get_asw`` method was added to calculate ASW.
+  + The ``ontologies.find_most_viable_parent`` method was added to help coarse
+    grain cell type ontology labels.
   + Optimized sampling weights of study and cell type.
 
-
 Version 0.2.0:  March 22, 2024
--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 + Updated version requirements for multiple dependencies and removed
   the ``pegasuspy`` dependency.
@@ -49,6 +53,6 @@ Version 0.2.0:  March 22, 2024
 
 
 Version 0.1.0:  August 13, 2023
--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
 + Initial public release.
