@@ -6,9 +6,16 @@ Installation and Setup
 Installing the SCimilarity API
 --------------------------------------------------------------------------------
 
-The SCimilarity API is under activate development. The latest API release can be
-downloaded from `GitHub <https://github.com/genentech/scimilarity>`__.
-Installation is quick and performed using ``pip`` in the usual manner:
+The latest API release can be installed quickly using ``pip`` in the
+usual manner:
+
+::
+
+    pip install scimilarity
+
+The SCimilarity API is under activate development. The latest development API
+can be downloaded from `GitHub <https://github.com/genentech/scimilarity>`__
+and installed as follows:
 
 ::
 
