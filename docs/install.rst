@@ -29,6 +29,13 @@ and installed as follows:
     high memory requirements. To make queries, you will need at least 64 GB of
     system RAM.
 
+.. warning::
+
+    If your environment has sufficient memory but loading the model or making
+    kNN queries crashes, that may be due to older versions of dependencies such
+    as hnswlib or numpy. We recommend using either using the Docker container
+    or Conda environment described below.
+
 .. note::
 
     A GPU is not necessary for most applications, but model training will
@@ -40,6 +47,19 @@ Downloading the pretrained models
 You can download the following pretrained models for use with SCimilarity from
 Zenodo:
 https://zenodo.org/records/10685499
+
+Conda environment setup
+--------------------------------------------------------------------------------
+
+To install the SCimilarity API in a [Conda](https://docs.conda.io) environment
+we recommend this environment setup:
+
+:download:`Download environment file <_static/environment.yaml>`
+
+.. literalinclude:: _static/environment.yaml
+  :language: YAML
+
+Followed by installing the ``scimilarity`` package via ``pip``, as above.
 
 Using the SCimilarity Docker container
 --------------------------------------------------------------------------------

@@ -1,0 +1,13 @@
+name: scimilarity
+channels:
+  - nvidia
+  - pytorch
+  - bioconda
+  - conda-forge
+dependencies:
+  - python=3.10
+  - ipykernel
+  - ipython
+  - ipywidgets
+  - leidenalg
+  - pip
