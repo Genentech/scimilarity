@@ -22,9 +22,9 @@ How to Cite
 
 To cite SCimilarity in publications please use:
 
-**Scalable querying of human cell atlases via a foundational model reveals commonalities
-across fibrosis-associated macrophages.**
-Graham Heimberg\*, Tony Kuo\*, Daryle DePianto, Tobias Heigl, Nathaniel Diamant,
-Omar Salem, Gabriele Scalia, Tommaso Biancalani, Jason Rock, Shannon Turley,
-Héctor Corrada Bravo, Josh Kaminker\*\*,  Jason A. Vander Heiden\*\*, Aviv Regev\*\*
-*bioRxiv.* `doi\:10.1101/2023.07.18.549537 <https://doi.org/10.1101/2023.07.18.549537>`__
+**A cell atlas foundation model for scalable search of similar human cells.**
+*Graham Heimberg\*, Tony Kuo\*, Daryle J. DePianto, Tobias Heigl,
+Nathaniel Diamant, Omar Salem, Gabriele Scalia, Tommaso Biancalani,
+Jason R. Rock, Shannon J. Turley, Héctor Corrada Bravo, Josh Kaminker\*\*,
+Jason A. Vander Heiden\*\*, Aviv Regev\*\*.*
+Nature (2024). https://doi.org/10.1038/s41586-024-08411-y
