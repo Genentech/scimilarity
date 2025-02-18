@@ -16,8 +16,12 @@ Documentation
 Tutorials and API documentation can be found at:
 https://genentech.github.io/scimilarity/index.html
 
-Download
+Download & Install
 --------------------------------------------------------------------------------
+
+The latest API release can be installed from PyPI::
+
+    pip install scimilarity
 
 Pretrained model weights, embeddings, kNN graphs, a single-cell metadata
 can be downloaded from:
