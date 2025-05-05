@@ -60,7 +60,6 @@ class CellEmbedding:
             n_genes=self.n_genes,
             latent_dim=parameters["latent_dim"],
             hidden_dim=parameters["hidden_dim"],
-            residual=False,
         )
         if self.use_gpu is True:
             self.model.cuda()

@@ -13,6 +13,7 @@ class CellQuery(CellSearchKNN):
         filenames: Optional[dict] = None,
         metadata_tiledb_uri: str = "cell_metadata",
         embedding_tiledb_uri: str = "cell_embedding",
+        knn_type: str = "hnswlib",
         load_knn: bool = True,
     ):
         """Constructor.
@@ -29,6 +30,8 @@ class CellQuery(CellSearchKNN):
             Relative path to the directory containing the tiledb cell metadata storage.
         embedding_tiledb_uri: str, default: "cell_embedding"
             Relative path to the directory containing the tiledb cell embedding storage.
+        knn_type: str, default: "hnswlib"
+            What type of knn to use, options are ["hnswlib", "tiledb_vector_search"]
         load_knn: bool, default: True
             Load the knn index. Set to False if knn is not needed.
 
@@ -45,6 +48,7 @@ class CellQuery(CellSearchKNN):
         super().__init__(
             model_path=model_path,
             use_gpu=use_gpu,
+            knn_type=knn_type,
         )
 
         self.cellsearch_path = os.path.join(model_path, "cellsearch")
@@ -63,6 +67,7 @@ class CellQuery(CellSearchKNN):
             self.cellsearch_path,
             filenames.get("cell_embeddings", "full_kNN_embedding.npy"),
         )
+        self.knn_type = knn_type
 
         # get knn
         if load_knn:
@@ -72,42 +77,12 @@ class CellQuery(CellSearchKNN):
         # get cell metadata: create tiledb storage if it does not exist
         # NOTE: process for creating this file is not hardened, no guarantee index column is unique
         metadata_tiledb_uri = os.path.join(self.cellsearch_path, metadata_tiledb_uri)
-        if not os.path.isdir(metadata_tiledb_uri):
-            print(f"Configuring tiledb dataframe: {metadata_tiledb_uri}")
-            cell_metadata = (
-                pd.read_csv(
-                    self.filenames["cell_metadata"],
-                    header=0,
-                    dtype=str,
-                )
-                .fillna("NA")
-                .reset_index(drop=True)
-            )
-            cell_metadata = cell_metadata.rename(columns={"Unnamed: 0": "index"})
-            convert_dict = {
-                "index": int,
-                "prediction_nn_dist": float,
-                "total_counts": float,
-                "n_genes_by_counts": float,
-                "total_counts_mt": float,
-                "pct_counts_mt": float,
-            }
-            if "fm_signature_score" in cell_metadata.columns:
-                convert_dict["fm_signature_score"] = float
-            for c in convert_dict:
-                cell_metadata[c] = cell_metadata[c].replace("NA", np.nan)
-            cell_metadata = cell_metadata.astype(convert_dict)
-            tiledb.from_pandas(metadata_tiledb_uri, cell_metadata)
         self.cell_metadata = tiledb.open(metadata_tiledb_uri, "r").df[:]
 
-        # get cell embeddings: create tiledb storage if it does not exist
-        embedding_tiledb_uri = os.path.join(self.cellsearch_path, embedding_tiledb_uri)
-        if not os.path.isdir(embedding_tiledb_uri):
-            cell_embeddings = np.load(
-                os.path.join(self.cellsearch_path, self.filenames["cell_embeddings"])
-            )
-            self.create_embeddings_tiledb(embedding_tiledb_uri, cell_embeddings)
-        self.cell_embedding = tiledb.open(embedding_tiledb_uri)
+        # cell embeddings
+        self.embedding_tiledb_uri = os.path.join(
+            self.cellsearch_path, embedding_tiledb_uri
+        )
 
         self.study_sample_index = (
             self.cell_metadata.groupby(["study", "sample", "data_type"], observed=True)[
@@ -116,60 +91,6 @@ class CellQuery(CellSearchKNN):
             .min()
             .sort_values()
         )
-
-    def create_embeddings_tiledb(
-        self, tiledb_uri: str, arr: "numpy.ndarray", batch_size: int = 100000
-    ):
-        """Create TileDB array from a numpy array of embeddings.
-
-        Parameters
-        ----------
-        tiledb_uri: str
-            URI for the TileDB array.
-        batch_size: int, default: 10000
-            Batch size for the tiles.
-        """
-
-        import numpy as np
-        from .utils import write_array_to_tiledb, optimize_tiledb_array
-        import tiledb
-        from tqdm import tqdm
-
-        print(f"Configuring tiledb array: {tiledb_uri}")
-
-        xdimtype = np.int32
-        ydimtype = np.int32
-        value_type = np.float32
-
-        xdim = tiledb.Dim(
-            name="x", domain=(0, arr.shape[0] - 1), tile=batch_size, dtype=xdimtype
-        )
-        ydim = tiledb.Dim(
-            name="y", domain=(0, arr.shape[1] - 1), tile=arr.shape[1], dtype=ydimtype
-        )
-        dom = tiledb.Domain(xdim, ydim)
-
-        attr = tiledb.Attr(
-            name="vals",
-            dtype=value_type,
-            filters=tiledb.FilterList([tiledb.GzipFilter()]),
-        )
-
-        schema = tiledb.ArraySchema(
-            domain=dom,
-            sparse=False,
-            cell_order="row-major",
-            tile_order="row-major",
-            attrs=[attr],
-        )
-        tiledb.Array.create(tiledb_uri, schema)
-
-        tdbfile = tiledb.open(tiledb_uri, "w")
-        write_array_to_tiledb(
-            tdbfile, arr, value_type, row_start=0, batch_size=batch_size
-        )
-        tdbfile.close()
-        optimize_tiledb_array(tiledb_uri)
 
     def get_precomputed_embeddings(
         self, idx: Union[slice, List[int]]
@@ -190,12 +111,14 @@ class CellQuery(CellSearchKNN):
         --------
         >>> array = cq.get_precomputed_embeddings([0, 1, 100])
         """
-        return self.cell_embedding.query(attrs=["vals"], coords=True).multi_index[idx][
-            "vals"
-        ]
+
+        from .utils import embedding_from_tiledb
+
+        return embedding_from_tiledb(idx, self.embedding_tiledb_uri)
 
     def annotate_cell_index(self, metadata: "pandas.DataFrame") -> "pandas.DataFrame":
-        """Annotate a metadata dataframe with the cell index in sample datasets.
+        """Annotate a metadata dataframe with the cell index in datasets at the SAMPLE level.
+           The cell index is the cell number, not related to the obs.index.
 
         Parameters
         ----------

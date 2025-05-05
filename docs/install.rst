@@ -48,6 +48,7 @@ You can download the following pretrained models for use with SCimilarity from
 Zenodo:
 https://zenodo.org/records/10685499
 
+
 Conda environment setup
 --------------------------------------------------------------------------------
 

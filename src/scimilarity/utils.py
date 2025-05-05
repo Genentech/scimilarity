@@ -59,8 +59,8 @@ def align_dataset(
     ----------
     data: anndata.AnnData
         Annotated data matrix with rows for cells and columns for genes.
-    target_gene_order: numpy.ndarray
-        An array containing the gene space.
+    target_gene_order: list
+        A list containing the gene space.
     keep_obsm: bool, default: True
         Retain the original data's obsm matrices in output.
     gene_overlap_threshold: int, default: 5000
@@ -74,7 +74,7 @@ def align_dataset(
     Examples
     --------
     >>> ca = CellAnnotation(model_path="/opt/data/model")
-    >>> align_dataset(data, ca.gene_order)
+    >>> data = align_dataset(data, ca.gene_order)
     """
 
     import anndata
@@ -83,9 +83,10 @@ def align_dataset(
     from scipy.sparse import csr_matrix
 
     # raise an error if not enough genes from target_gene_order exists
-    if sum(data.var.index.isin(target_gene_order)) < gene_overlap_threshold:
+    gene_overlap = sum(data.var.index.isin(target_gene_order))
+    if gene_overlap < gene_overlap_threshold:
         raise RuntimeError(
-            f"Dataset incompatible: gene overlap less than {gene_overlap_threshold}. Check that var.index uses gene symbols."
+            f"Dataset incompatible. Gene overlap of {gene_overlap} less than {gene_overlap_threshold}. Check that var.index uses gene symbols."
         )
 
     # check if X is dense, convert to csr_matrix if so
@@ -220,7 +221,7 @@ def consolidate_duplicate_symbols(
         return adata
 
     dup_genes_data = []
-    for k in dup_genes:
+    for k in sorted(dup_genes):
         idx = [i for i, x in enumerate(adata.var.index.values) if x == k]
         counts = csr_matrix(
             np.array(adata.layers["counts"][:, idx].sum(axis=1)).flatten()[:, None]
@@ -402,7 +403,7 @@ def write_array_to_tiledb(
     tdb: tiledb.libtiledb.DenseArrayImpl
         TileDB array.
     arr: numpy.ndarray
-        Dense numpy array.
+        Dense 2D numpy array.
     value_type: type
         The type of the value, typically np.float32.
     row_start: int, default: 0
@@ -411,13 +412,11 @@ def write_array_to_tiledb(
         Batch size for the tiles.
     """
 
-    import tqdm
-
-    for row in tqdm(range(0, arr.shape[0], batch_size)):
-        arr_slice = slice(row, row + batch_size)
-        tdb_slice = slice(row + row_start, row + row_start + batch_size)
+    for i in range(0, arr.shape[0], batch_size):
+        j = min(i + batch_size, arr.shape[0])
+        arr_slice = slice(i, j)
+        tdb_slice = slice(i + row_start, j + row_start)
         tdbfile[tdb_slice, 0 : arr.shape[1]] = arr[arr_slice, :].astype(value_type)
-    tdbfile.close()
 
 
 def write_csr_to_tiledb(
@@ -470,10 +469,7 @@ def write_csr_to_tiledb(
 
 def optimize_tiledb_array(
     tiledb_array_uri: str,
-    steps=100000,
-    step_max_frags: int = 10,
-    buffer_size: int = 1000000000,  # 1GB
-    total_budget: int = 200000000000,  # 200GB
+    config: Optional["tiledb.ctx.Config"] = None,
     verbose: bool = True,
 ):
     """Optimize TileDB Array.
@@ -495,12 +491,18 @@ def optimize_tiledb_array(
     if verbose:
         print("Fragments before consolidation: {}".format(len(frags)))
 
-    cfg = tiledb.Config()
-    cfg["sm.consolidation.steps"] = steps
-    cfg["sm.consolidation.step_min_frags"] = 2
-    cfg["sm.consolidation.step_max_frags"] = step_max_frags
-    cfg["sm.consolidation.buffer_size"] = buffer_size
-    cfg["sm.mem.total_budget"] = total_budget
+    if config is None:
+        cfg = tiledb.Config(
+            {
+                "sm.consolidation.steps": 500000,
+                "sm.consolidation.step_min_frags": 2,
+                "sm.consolidation.step_max_frags": 10,
+                "sm.consolidation.buffer_size": 1000000000,  # 1G
+                "sm.mem.total_budget": 200000000000,  # 200G
+            }
+        )
+    else:
+        cfg = config
     tiledb.consolidate(tiledb_array_uri, config=cfg)
     tiledb.vacuum(tiledb_array_uri)
 
@@ -539,6 +541,191 @@ def query_tiledb_df(
     result = result.dropna()
 
     return result
+
+
+def adata_from_tiledb(
+    cell_idx: Union[list, "numpy.ndarray"],
+    tiledb_base_path: str,
+    gene_order: Optional[List[str]] = None,
+    SAMPLEURI: str = "sample_metadata",
+    GENEURI: str = "gene_annotation",
+    CELLURI: str = "cell_metadata",
+    COUNTSURI: str = "counts",
+    config: Optional["tiledb.ctx.Config"] = None,
+    lognorm: bool = True,
+    target_sum: float = 1e4,
+):
+    """Constructs an AnnData object from cells in tiledb.
+
+    Parameters
+    ----------
+    cell_idx: Union[list, "numpy.ndarray"]
+        Cell indices in the tiledb.
+    tiledb_base_path: str
+        Base path of tiledb store
+    gene_order: List[str], optional, default: None
+        Gene order
+    SAMPLEURI: str, default:"sample_metadata"
+        Sub path of sample metadata store
+    GENEURI: str, default:"gene_annotation"
+        Sub path of gene annotation store
+    CELLURI: str, default:"cell_metadata"
+        Sub path of cell metadata store
+    COUNTSURI: str, default:"counts"
+        Sub path of count matrix store
+    config: tiledb.ctx.Config, optional, default: None
+        Custom tiledb config
+    lognorm: bool, default: True
+        Whether to return log normalized expression instead of raw counts.
+    target_sum: float, default: 1e4
+        Target sum for log normalization.
+
+    Returns
+    -------
+    anndata.AnnData
+        A data object where counts are in layers["counts"] and X is the lognorm expression
+
+    Examples
+    --------
+    >>> adata = adata_from_tiledb(cell_idx, gene_order, tiledb_base_path)
+    """
+
+    import anndata
+    import numpy as np
+    import os
+    import pandas as pd
+    from scipy.sparse import coo_matrix, diags
+    import tiledb
+
+    if config is None:
+        cfg = tiledb.Config()
+        cfg["sm.mem.total_budget"] = 50000000000  # 50G
+    else:
+        cfg = config
+
+    gene_tdb = tiledb.open(os.path.join(tiledb_base_path, GENEURI), "r", config=cfg)
+    genes = (
+        gene_tdb.query(attrs=["cellarr_gene_index"])
+        .df[:]["cellarr_gene_index"]
+        .tolist()
+    )
+    gene_tdb.close()
+    if gene_order is not None:
+        gene_indices = []
+        for x in gene_order:
+            try:
+                gene_indices.append(genes.index(x))
+            except:
+                log.info(f"Gene not found: {x}")
+                pass
+    else:
+        gene_order = genes
+        gene_indices = list(range(0, len(genes)))
+
+    # sorted indices are needed for tiledb, keep original indices to unsort later
+    cell_idx = np.array(cell_idx)
+    sorted_idx = np.argsort(cell_idx)
+    original_idx = np.argsort(sorted_idx)
+    sorted_cell_idx = cell_idx[sorted_idx]
+
+    cell_tdb = tiledb.open(os.path.join(tiledb_base_path, CELLURI), "r", config=cfg)
+    obs = cell_tdb.df[sorted_cell_idx]
+    cell_tdb.close()
+
+    matrix_tdb = tiledb.open(os.path.join(tiledb_base_path, COUNTSURI), "r", config=cfg)
+    attr = matrix_tdb.schema.attr(0).name
+    matrix_shape = (
+        matrix_tdb.nonempty_domain()[0][1] + 1,
+        matrix_tdb.nonempty_domain()[1][1] + 1,
+    )
+    results = matrix_tdb.multi_index[sorted_cell_idx, :]
+    matrix_tdb.close()
+
+    counts = coo_matrix(
+        (results[attr], (results["cell_index"], results["gene_index"])),
+        shape=matrix_shape,
+    ).tocsr()
+    counts = counts[sorted_cell_idx, :]
+    counts = counts[:, gene_indices]
+    counts = counts[original_idx, :]
+
+    X = counts.astype(np.float32)
+
+    if lognorm:
+        # normalize to target sum
+        row_sums = np.ravel(X.sum(axis=1))  # row sums as a 1D array
+        # avoid division by zero by setting zero sums to one (they will remain zero after normalization)
+        row_sums[row_sums == 0] = 1
+        # create a sparse diagonal matrix with the inverse of the row sums
+        inv_row_sums = diags(1 / row_sums).tocsr()
+        # normalize the rows to sum to 1
+        normalized_matrix = inv_row_sums.dot(X)
+        # scale the rows sum to target_sum
+        target_sum = 1e4
+        X = normalized_matrix.multiply(target_sum)
+        X = X.log1p()
+
+    obs = obs.reindex(cell_idx)
+    adata = anndata.AnnData(
+        X=X,
+        obs=obs,
+        var=pd.DataFrame(index=gene_order),
+    )
+    adata.layers["counts"] = counts.astype(np.int32)
+
+    return adata
+
+
+def embedding_from_tiledb(
+    cell_idx: Union[list, "numpy.ndarray"],
+    embedding_tdb_uri: str,
+    config: Optional["tiledb.ctx.Config"] = None,
+):
+    """Get embeddings from a precomputed tiledb.
+
+    Parameters
+    ----------
+    cell_idx: Union[list, "numpy.ndarray"]
+        Cell indices in the tiledb.
+    embedding_tdb_uri: str
+        Path of tiledb store
+    config: tiledb.ctx.Config, optional, default: None
+        Custom tiledb config
+
+    Returns
+    -------
+    numpy.ndarrary
+        Array of embeddings
+
+    Examples
+    --------
+    >>> embedding = embedding_from_tiledb(cell_idx, embedding_tdb_uri)
+    """
+
+    import numpy as np
+    import tiledb
+
+    if config is None:
+        cfg = tiledb.Config()
+        cfg["sm.mem.total_budget"] = 50000000000  # 50G
+    else:
+        cfg = config
+
+    # sorted indices are needed for tiledb, keep original indices to unsort later
+    cell_idx = np.array(cell_idx)
+    sorted_idx = np.argsort(cell_idx)
+    original_idx = np.argsort(sorted_idx)
+    sorted_cell_idx = cell_idx[sorted_idx]
+
+    embedding_tdb = tiledb.open(embedding_tdb_uri, "r", config=cfg)
+    attr = embedding_tdb.schema.attr(0).name
+    embedding = embedding_tdb.query(attrs=[attr], coords=True).multi_index[
+        sorted_cell_idx
+    ][attr]
+    embedding_tdb.close()
+    embedding = embedding[original_idx, :]
+
+    return embedding
 
 
 def pseudobulk_anndata(
@@ -913,6 +1100,17 @@ def clean_tissues(tissues: "pandas.Series") -> "pandas.Series":
             "peripheral region of retina",
             "fovea centralis",
             "pigment epithelium of eye",
+            "CD31_choroid",
+            "retinal pigment epithelium",
+            "Optic Nerve",
+            "Peripapillary Sclera",
+            "Retinal Pigment Epithelium/Choroid, peripheral retina",
+            "Sclera",
+            "Optic Nerve Head",
+            "Retinal Pigment Epithelium/Choroid",
+            "Retinal Pigment Epithelium/Choroid, macula",
+            "chorioretinal region",
+            "retinal neural layer",
         },
         "stomach": {"stomach"},
         "gut": {
