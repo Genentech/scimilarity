@@ -10,7 +10,7 @@ VOLUME /workspace
 VOLUME /scratch
 
 # Tools
-COPY docker/start-notebook.sh /usr/local/bin/start-notebook
+COPY start-notebook.sh /usr/local/bin/start-notebook
 
 # Environment
 ENV SCDATA_HOME=/data
