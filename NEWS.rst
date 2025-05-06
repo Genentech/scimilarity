@@ -1,6 +1,29 @@
 Release Notes
 ================================================================================
 
+Version 0.4.0:  May 05, 2025
+--------------------------------------------------------------------------------
+
+General:
+  + A new training tutorial has been added which describes the new training
+    workflow. This includes data preparation, training, and post-training data
+    structures using the new scripts.
+
+Training:
+  + A new training workflow has been added to use CellArr, a TileDB based
+    framework, as the data store to streamline the end-to-end process. This
+    replaces the old Zarr based workflows.
+  + New data loaders and samplers for CellArr data have been added in the
+    ``tiledb_data_models`` module.
+  + A example training script has been added to show how to train models as
+    ``scripts/train.py``.
+  + New scripts for creating all post-training data structures have been added
+    in the folder ``scripts``.
+  + New utility methods that make use of the CellArr store:
+    ``utils.query_tiledb_df`` to query a tiledb dataframe,
+    ``utils.adata_from_tiledb`` to extract cells from the tiledb stores based on
+    index, including raw counts.
+
 Version 0.3.0:  November 19, 2024
 --------------------------------------------------------------------------------
 

@@ -2,6 +2,7 @@ from itertools import combinations
 import numpy as np
 import random
 import torch
+import torch.nn.functional as F
 from typing import List, Union, Optional
 
 from .ontologies import (
@@ -14,37 +15,31 @@ from .ontologies import (
 
 
 class TripletSelector:
-    """For each anchor-positive pair, mine negative samples to create a triplet."""
+    """For each anchor-positive pair, mine negative samples to create a triplet.
+
+    Parameters
+    ----------
+    margin: float
+        Triplet loss margin.
+    negative_selection: str, default: "semihard"
+        Method for negative selection: {"semihard", "hardest", "random"}.
+    perturb_labels: bool, default: False
+        Whether to perturb the ontology labels by coarse graining one level up.
+    perturb_labels_fraction: float, default: 0.5
+        The fraction of labels to perturb.
+
+    Examples
+    --------
+    >>> triplet_selector = TripletSelector(margin=0.05, negative_selection="semihard")
+    """
 
     def __init__(
         self,
         margin: float,
         negative_selection: str = "semihard",
-        perturb_labels: bool = True,
+        perturb_labels: bool = False,
         perturb_labels_fraction: float = 0.5,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        margin: float
-            Triplet loss margin.
-        negative_selection: str, default: "semihard"
-            Method for negative selection: {"semihard", "hardest", "random"}.
-        perturb_labels: bool, default: True
-            Whether to perturb the ontology labels by coarse graining one level up.
-        perturb_labels_fraction: float, default: 0.5
-            The fraction of labels to perturb.
-
-        Examples
-        --------
-        >>> triplet_selector = TripletSelector(margin=0.05,
-                negative_selection="semihard",
-                perturb_labels=True,
-                perturb_labels_fraction=0.5,
-            )
-        """
-
         self.margin = margin
         self.negative_selection = negative_selection
 
@@ -110,9 +105,8 @@ class TripletSelector:
             for i in perturb_list:  # cells chosen for perturbation of labels
                 term_id = self.name2id[int2label[labels[i]]]
                 parents = set()
-                max_ancestors = (
-                    1  # range of ancestor levels. 1: parents, 2: grandparents, ...
-                )
+                # Max ancestor levels: 1=parents, 2=grandparents, ...
+                max_ancestors = 1
                 ancestor_level = 0
                 while ancestor_level < max_ancestors:
                     ancestor_level += 1
@@ -194,58 +188,11 @@ class TripletSelector:
         anchor_idx, positive_idx, negative_idx = tuple(
             map(list, zip(*triplets))
         )  # tuple([list(t) for t in zip(*triplets)])
-
         return (
             (
                 anchor_idx,
                 positive_idx,
                 negative_idx,
-            ),
-            num_hard_triplets,
-            num_viable_triplets,
-        )
-
-    def get_triplets(
-        self,
-        embeddings: Union[np.ndarray, torch.Tensor],
-        labels: Union[np.ndarray, torch.Tensor],
-        int2label: dict,
-        studies: Optional[Union[np.ndarray, torch.Tensor, list]] = None,
-    ):
-        """Get triplets as anchor, positive, and negative cell embeddings.
-
-        Parameters
-        ----------
-        embeddings: numpy.ndarray, torch.Tensor
-            Cell embeddings.
-        labels: numpy.ndarray, torch.Tensor
-            Cell labels in integer form.
-        int2label: dict
-            Dictionary to map labels in integer form to string
-        studies: numpy.ndarray, torch.Tensor, optional, default: None
-            Studies metadata for each cell.
-
-        Returns
-        -------
-        triplets: Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
-            A tuple of numpy arrays containing anchor, positive, and negative cell embeddings.
-        num_hard_triplets: int
-            Number of hard triplets.
-        num_viable_triplets: int
-            Number of viable triplets.
-        """
-
-        (
-            triplets_idx,
-            num_hard_triplets,
-            num_viable_triplets,
-        ) = self.get_triplets_idx(embeddings, labels, int2label, studies)
-        anchor_idx, positive_idx, negative_idx = triplets_idx
-        return (
-            (
-                embeddings[anchor_idx],
-                embeddings[positive_idx],
-                embeddings[negative_idx],
             ),
             num_hard_triplets,
             num_viable_triplets,
@@ -405,3 +352,85 @@ class TripletSelector:
             s_i = (b_i - a_i) / np.max([a_i, b_i])
             sw.append(s_i)
         return np.mean(sw)
+
+
+class TripletLoss(torch.nn.TripletMarginLoss):
+    """
+    Wrapper for pytorch TripletMarginLoss.
+    Triplets are generated using TripletSelector object which take embeddings and labels
+    then return triplets.
+
+    Parameters
+    ----------
+    margin: float
+        Triplet loss margin.
+    sample_across_studies: bool, default: True
+        Whether to enforce anchor-positive pairs being from different studies.
+    negative_selection: str
+        Method for negative selection: {"semihard", "hardest", "random"}
+    perturb_labels: bool, default: False
+        Whether to perturb the ontology labels by coarse graining one level up.
+    perturb_labels_fraction: float, default: 0.5
+        The fraction of labels to perturb
+
+    Examples
+    --------
+    >>> triplet_loss = TripletLoss(margin=0.05)
+    """
+
+    def __init__(
+        self,
+        margin: float,
+        sample_across_studies: bool = True,
+        negative_selection: str = "semihard",
+        perturb_labels: bool = False,
+        perturb_labels_fraction: float = 0.5,
+    ):
+        super().__init__()
+        self.margin = margin
+        self.sample_across_studies = sample_across_studies
+        self.triplet_selector = TripletSelector(
+            margin=margin,
+            negative_selection=negative_selection,
+            perturb_labels=perturb_labels,
+            perturb_labels_fraction=perturb_labels_fraction,
+        )
+
+    def forward(
+        self,
+        embeddings: torch.Tensor,
+        labels: torch.Tensor,
+        int2label: dict,
+        studies: torch.Tensor,
+    ):
+        if self.sample_across_studies is False:
+            studies = None
+
+        (
+            triplets_idx,
+            num_violating_triplets,
+            num_viable_triplets,
+        ) = self.triplet_selector.get_triplets_idx(
+            embeddings, labels, int2label, studies
+        )
+
+        anchor_idx, positive_idx, negative_idx = triplets_idx
+        anchor = embeddings[anchor_idx]
+        positive = embeddings[positive_idx]
+        negative = embeddings[negative_idx]
+
+        return (
+            F.triplet_margin_loss(
+                anchor,
+                positive,
+                negative,
+                margin=self.margin,
+                p=self.p,
+                eps=self.eps,
+                swap=self.swap,
+                reduction="none",
+            ),
+            torch.tensor(num_violating_triplets, dtype=torch.float),
+            torch.tensor(num_viable_triplets, dtype=torch.float),
+            triplets_idx,
+        )

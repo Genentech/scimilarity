@@ -1,4 +1,4 @@
-FROM fedora:38
+FROM fedora:42
 LABEL maintainer="Jason Anthony Vander Heiden [vandej27@gene.com]" \
       org.opencontainers.image.description="SCimilarity" \
       org.opencontainers.image.source="https://github.com/genentech/scimilarity"
@@ -10,7 +10,7 @@ VOLUME /workspace
 VOLUME /scratch
 
 # Tools
-COPY start-notebook.sh /usr/local/bin/start-notebook
+COPY docker/start-notebook.sh /usr/local/bin/start-notebook
 
 # Environment
 ENV SCDATA_HOME=/data
@@ -28,13 +28,13 @@ RUN dnf -y update && dnf install -y \
     python3 \
     python3-aiohttp \
     python3-asciitree \
-    python3-bash-kernel \
     python3-biopython \
     python3-cloudpickle \
     python3-Cython \
     python3-numcodecs \
     python3-dask \
     python3-dask+array \
+    python3-devel \
     python3-fasteners \
     python3-GitPython \
     python3-h5py \
@@ -74,6 +74,8 @@ RUN pip3 install \
 	scikit-misc \
 	numba \
 	tiledb \
+    tiledb-cloud \
+    tiledb-vector-search \
 	leidenalg \
 	louvain \
 	umap-learn \
@@ -83,7 +85,8 @@ RUN pip3 install \
 	captum \
 	torch \
 	pytorch-lightning \
-    scanpy
+    scanpy \
+    scrublet
 
 # Install SCimilarity API
 RUN git clone https://github.com/Genentech/scimilarity.git /tmp/scimilarity \

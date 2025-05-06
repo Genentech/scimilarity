@@ -3,10 +3,6 @@
 Tutorials
 ================================================================================
 
-.. note::
-    Tutorials are under construction. A model training tutorial is coming
-    Soon :sup:`TM`.
-
 .. nbgallery::
 
     Individual cell search <notebooks/cell_search_tutorial_1>
@@ -14,3 +10,4 @@ Tutorials
     Cluster-based search <notebooks/cell_search_tutorial_3>
     Cell type annotation <notebooks/cell_annotation_tutorial>
     Gene attribution and comparison <notebooks/advanced_tutorial>
+    Model training <notebooks/training_tutorial>

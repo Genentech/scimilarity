@@ -3,17 +3,15 @@ from typing import Optional, Union
 
 
 class SimpleDist(nn.Module):
-    """Calculates the distance between representations"""
+    """Calculates the distance between representations
+
+    Parameters
+    ----------
+    encoder: torch.nn.Module
+        The encoder pytorch object.
+    """
 
     def __init__(self, encoder: "torch.nn.Module"):
-        """Constructor.
-
-        Parameters
-        ----------
-        encoder: torch.nn.Module
-            The encoder pytorch object.
-        """
-
         super().__init__()
         self.encoder = encoder
 
@@ -43,27 +41,25 @@ class SimpleDist(nn.Module):
 
 
 class Interpreter:
-    """A class that interprets significant genes."""
+    """A class that interprets significant genes.
+
+    Parameters
+    ----------
+    encoder: torch.nn.Module
+        The encoder pytorch object.
+    gene_order: list
+        The list of genes.
+
+    Examples
+    --------
+    >>> interpreter = Interpreter(CellEmbedding("/opt/data/model").model)
+    """
 
     def __init__(
         self,
         encoder: "torch.nn.Module",
         gene_order: list,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        encoder: torch.nn.Module
-            The encoder pytorch object.
-        gene_order: list
-            The list of genes.
-
-        Examples
-        --------
-        >>> interpreter = Interpreter(CellEmbedding("/opt/data/model").model)
-        """
-
         from captum.attr import IntegratedGradients
 
         self.encoder = encoder

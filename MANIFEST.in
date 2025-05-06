@@ -1,3 +1,4 @@
 exclude .gitignore
 recursive-exclude .github *
 recursive-exclude docker *
+recursive-exclude scripts *

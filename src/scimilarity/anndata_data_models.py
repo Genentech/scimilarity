@@ -1,9 +1,7 @@
 import anndata
 from collections import Counter
 import numpy as np
-import pandas as pd
 import pytorch_lightning as pl
-import scanpy
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from typing import Optional
@@ -13,7 +11,17 @@ from .ontologies import import_cell_ontology, get_id_mapper
 
 
 class scDataset(Dataset):
-    """A class that represent a single cell dataset."""
+    """A class that represents a single cell dataset.
+
+    Parameters
+    ----------
+    X: numpy.ndarray
+        Gene expression vectors for every cell.
+    Y: numpy.ndarray
+        Text labels for every cell.
+    study: numpy.ndarray
+        The study identifier for every cell.
+    """
 
     def __init__(self, X, Y, study=None):
         self.X = X
@@ -29,7 +37,33 @@ class scDataset(Dataset):
 
 
 class MetricLearningDataModule(pl.LightningDataModule):
-    """A class to encapsulate the anndata needed to train the model."""
+    """A class to encapsulate the anndata needed to train the model.
+
+    Parameters
+    ----------
+    train_path: str
+        Path to the training h5ad file.
+    val_path: str, optional, default: None
+        Path to the validataion h5ad file.
+    obs_field: str, default: "celltype_name"
+        The obs key name containing celltype labels.
+    batch_size: int, default: 1000
+        Batch size.
+    num_workers: int, default: 1
+        The number of worker threads for dataloaders.
+    gene_order_file: str, optional
+        Use a given gene order as described in the specified file rather than using the
+        training dataset's gene order. One gene symbol per line.
+
+    Examples
+    --------
+    >>> datamodule = MetricLearningDataModule(
+            batch_size=1000,
+            num_workers=1,
+            obs_field="celltype_name",
+            train_path="train.h5ad",
+        )
+    """
 
     def __init__(
         self,
@@ -40,34 +74,6 @@ class MetricLearningDataModule(pl.LightningDataModule):
         num_workers: int = 1,
         gene_order_file: Optional[str] = None,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        train_path: str
-            Path to the training h5ad file.
-        val_path: str, optional, default: None
-            Path to the validataion h5ad file.
-        obs_field: str, default: "celltype_name"
-            The obs key name containing celltype labels.
-        batch_size: int, default: 1000
-            Batch size.
-        num_workers: int, default: 1
-            The number of worker threads for dataloaders.
-        gene_order_file: str, optional
-            Use a given gene order as described in the specified file rather than using the
-            training dataset's gene order. One gene symbol per line.
-
-        Examples
-        --------
-        >>> datamodule = MetricLearningDataModule(
-                batch_size=1000,
-                num_workers=1,
-                obs_field="celltype_name",
-                train_path="train.h5ad",
-            )
-        """
-
         super().__init__()
         self.train_path = train_path
         self.val_path = val_path

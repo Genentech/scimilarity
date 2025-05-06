@@ -34,7 +34,7 @@ def import_cell_ontology(
 
     Parameters
     ----------
-    url: str, default: "/gstore/data/omni/scdb/cell-ontology-2022-09-15/cl-basic.obo"
+    url: str, default: "http://purl.obolibrary.org/obo/cl/cl-basic.obo"
         The url of the ontology obo file.
 
     Returns

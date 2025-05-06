@@ -31,6 +31,7 @@ API Reference
 
     modules/anndata_data_models
     modules/nn_models
+    modules/tiledb_data_models
     modules/training_models
     modules/triplet_selector
     modules/zarr_data_models
@@ -69,6 +70,7 @@ support for these training tasks.
 
 * :mod:`scimilarity.anndata_data_models`
 * :mod:`scimilarity.nn_models`
+* :mod:`scimilarity.tiledb_data_models`
 * :mod:`scimilarity.training_models`
 * :mod:`scimilarity.triplet_selector`
 * :mod:`scimilarity.zarr_data_models`
