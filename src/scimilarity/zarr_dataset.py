@@ -12,23 +12,20 @@ ARRAY_FORMATS = {
 class ZarrDataset:
     """A class that reads and manipulates zarr datasets saved by AnnData from disk.
     Adapted from https://github.com/lilab-bcb/backedarray
+
+    Parameters
+    ----------
+    store_path: str
+        Path to folder containing all the dataset in zarr format.
+    mode: str, default: "r"
+        The persistence mode for the zarr dataset.
+
+    Examples
+    --------
+    >>> zarr_data = ZarrDataset("/data/dataset.zarr")
     """
 
     def __init__(self, store_path: str, mode: str = "r"):
-        """Constructor.
-
-        Parameters
-        ----------
-        store_path: str
-            Path to folder containing all the dataset in zarr format.
-        mode: str, default: "r"
-            The persistence mode for the zarr dataset.
-
-        Examples
-        --------
-        >>> zarr_data = ZarrDataset("/data/dataset.zarr")
-        """
-
         import zarr
 
         self.store_path = zarr.DirectoryStore(store_path)
@@ -42,7 +39,7 @@ class ZarrDataset:
 
         Returns
         -------
-        d: dict
+        dict
             A dict containing information on the content of the dataset, such
             as keys in the various object attributes.
 
@@ -242,6 +239,8 @@ class ZarrDataset:
         ----------
         matrix: csr_matrix, csc_matrix
             The sparse matrix.
+        axis: int, optional
+            axis to append.
 
         Examples
         --------
@@ -734,6 +733,8 @@ class ZarrDataset:
             A zarr group.
         matrix: scipy.sparse.csr_matrix, scipy.sparse.csc_matrix, scipy.sparse.coo_matrix
             A sparse matrix.
+        axis: int, optional
+            axis to append.
 
         Examples
         --------
@@ -979,6 +980,8 @@ class ZarrDataset:
         ----------
         annotation: str,
             Annotation name (i.e. obs, var).
+        df: pandas.DataFrame
+            DataFrame with annotations to append
 
         Examples
         --------

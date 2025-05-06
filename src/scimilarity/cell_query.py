@@ -4,7 +4,29 @@ from .cell_search_knn import CellSearchKNN
 
 
 class CellQuery(CellSearchKNN):
-    """A class that searches for similar cells using a cell embedding."""
+    """A class that searches for similar cells using a cell embedding.
+
+    Parameters
+    ----------
+    model_path: str
+        Path to the model directory.
+    use_gpu: bool, default: False
+        Use GPU instead of CPU.
+    filenames: dict, optional, default: None
+        Use a dictionary of custom filenames for model files instead default.
+    metadata_tiledb_uri: str, default: "cell_metadata"
+        Relative path to the directory containing the tiledb cell metadata storage.
+    embedding_tiledb_uri: str, default: "cell_embedding"
+        Relative path to the directory containing the tiledb cell embedding storage.
+    knn_type: str, default: "hnswlib"
+        What type of knn to use, options are ["hnswlib", "tiledb_vector_search"]
+    load_knn: bool, default: True
+        Load the knn index. Set to False if knn is not needed.
+
+    Examples
+    --------
+    >>> cq = CellQuery(model_path="/opt/data/model")
+    """
 
     def __init__(
         self,
@@ -16,30 +38,6 @@ class CellQuery(CellSearchKNN):
         knn_type: str = "hnswlib",
         load_knn: bool = True,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        model_path: str
-            Path to the model directory.
-        use_gpu: bool, default: False
-            Use GPU instead of CPU.
-        filenames: dict, optional, default: None
-            Use a dictionary of custom filenames for model files instead default.
-        metadata_tiledb_uri: str, default: "cell_metadata"
-            Relative path to the directory containing the tiledb cell metadata storage.
-        embedding_tiledb_uri: str, default: "cell_embedding"
-            Relative path to the directory containing the tiledb cell embedding storage.
-        knn_type: str, default: "hnswlib"
-            What type of knn to use, options are ["hnswlib", "tiledb_vector_search"]
-        load_knn: bool, default: True
-            Load the knn index. Set to False if knn is not needed.
-
-        Examples
-        --------
-        >>> cq = CellQuery(model_path="/opt/data/model")
-        """
-
         import os
         import numpy as np
         import pandas as pd

@@ -4,7 +4,21 @@ from .cell_search_knn import CellSearchKNN
 
 
 class CellAnnotation(CellSearchKNN):
-    """A class that annotates cells using a cell embedding and then knn search."""
+    """A class that annotates cells using a cell embedding and then knn search.
+
+    Parameters
+    ----------
+    model_path: str
+        Path to the directory containing model files.
+    use_gpu: bool, default: False
+        Use GPU instead of CPU.
+    filenames: dict, optional, default: None
+        Use a dictionary of custom filenames for files instead default.
+
+    Examples
+    --------
+    >>> ca = CellAnnotation(model_path="/opt/data/model")
+    """
 
     def __init__(
         self,
@@ -12,22 +26,6 @@ class CellAnnotation(CellSearchKNN):
         use_gpu: bool = False,
         filenames: Optional[dict] = None,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        model_path: str
-            Path to the directory containing model files.
-        use_gpu: bool, default: False
-            Use GPU instead of CPU.
-        filenames: dict, optional, default: None
-            Use a dictionary of custom filenames for files instead default.
-
-        Examples
-        --------
-        >>> ca = CellAnnotation(model_path="/opt/data/model")
-        """
-
         import os
 
         super().__init__(

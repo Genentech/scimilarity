@@ -15,7 +15,23 @@ from .ontologies import (
 
 
 class TripletSelector:
-    """For each anchor-positive pair, mine negative samples to create a triplet."""
+    """For each anchor-positive pair, mine negative samples to create a triplet.
+
+    Parameters
+    ----------
+    margin: float
+        Triplet loss margin.
+    negative_selection: str, default: "semihard"
+        Method for negative selection: {"semihard", "hardest", "random"}.
+    perturb_labels: bool, default: False
+        Whether to perturb the ontology labels by coarse graining one level up.
+    perturb_labels_fraction: float, default: 0.5
+        The fraction of labels to perturb.
+
+    Examples
+    --------
+    >>> triplet_selector = TripletSelector(margin=0.05, negative_selection="semihard")
+    """
 
     def __init__(
         self,
@@ -24,24 +40,6 @@ class TripletSelector:
         perturb_labels: bool = False,
         perturb_labels_fraction: float = 0.5,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        margin: float
-            Triplet loss margin.
-        negative_selection: str, default: "semihard"
-            Method for negative selection: {"semihard", "hardest", "random"}.
-        perturb_labels: bool, default: False
-            Whether to perturb the ontology labels by coarse graining one level up.
-        perturb_labels_fraction: float, default: 0.5
-            The fraction of labels to perturb.
-
-        Examples
-        --------
-        >>> triplet_selector = TripletSelector(margin=0.05, negative_selection="semihard")
-        """
-
         self.margin = margin
         self.negative_selection = negative_selection
 
@@ -361,6 +359,23 @@ class TripletLoss(torch.nn.TripletMarginLoss):
     Wrapper for pytorch TripletMarginLoss.
     Triplets are generated using TripletSelector object which take embeddings and labels
     then return triplets.
+
+    Parameters
+    ----------
+    margin: float
+        Triplet loss margin.
+    sample_across_studies: bool, default: True
+        Whether to enforce anchor-positive pairs being from different studies.
+    negative_selection: str
+        Method for negative selection: {"semihard", "hardest", "random"}
+    perturb_labels: bool, default: False
+        Whether to perturb the ontology labels by coarse graining one level up.
+    perturb_labels_fraction: float, default: 0.5
+        The fraction of labels to perturb
+
+    Examples
+    --------
+    >>> triplet_loss = TripletLoss(margin=0.05)
     """
 
     def __init__(
@@ -371,26 +386,6 @@ class TripletLoss(torch.nn.TripletMarginLoss):
         perturb_labels: bool = False,
         perturb_labels_fraction: float = 0.5,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        margin: float
-            Triplet loss margin.
-        sample_across_studies: bool, default: True
-            Whether to enforce anchor-positive pairs being from different studies.
-        negative_selection: str
-            Method for negative selection: {"semihard", "hardest", "random"}
-        perturb_labels: bool, default: False
-            Whether to perturb the ontology labels by coarse graining one level up.
-        perturb_labels_fraction: float, default: 0.5
-            The fraction of labels to perturb
-
-        Examples
-        --------
-        >>> triplet_loss = TripletLoss(margin=0.05)
-        """
-
         super().__init__()
         self.margin = margin
         self.sample_across_studies = sample_across_studies

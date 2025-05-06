@@ -1,7 +1,6 @@
 from collections import Counter
 import numpy as np
 import os
-import pandas as pd
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
@@ -12,21 +11,19 @@ from .zarr_dataset import ZarrDataset
 
 
 class scDataset(Dataset):
-    """A class that represent a collection of single cell datasets in zarr format."""
+    """A class that represent a collection of single cell datasets in zarr format.
+
+    Parameters
+    ----------
+    data_list: list
+        List of single-cell datasets.
+    obs_celltype: str, default: "celltype_name"
+        Cell type name.
+    obs_study: str, default: "study"
+        Study name.
+    """
 
     def __init__(self, data_list, obs_celltype="celltype_name", obs_study="study"):
-        """Constructor.
-
-        Parameters
-        ----------
-        data_list: list
-            List of single-cell datasets.
-        obs_celltype: str, default: "celltype_name"
-            Cell type name.
-        obs_study: str, default: "study"
-            Study name.
-        """
-
         self.data_list = data_list
         self.ncells_list = [data.shape[0] for data in data_list]
         self.ncells = sum(self.ncells_list)
@@ -55,7 +52,38 @@ class scDataset(Dataset):
 
 
 class MetricLearningDataModule(pl.LightningDataModule):
-    """A class to encapsulate a collection of zarr datasets to train the model."""
+    """A class to encapsulate a collection of zarr datasets to train the model.
+
+    Parameters
+    ----------
+    train_path: str
+        Path to folder containing all training datasets.
+        All datasets should be in zarr format, aligned to a known gene space, and
+        cleaned to only contain valid cell ontology terms.
+    gene_order: str
+        Use a given gene order as described in the specified file. One gene
+        symbol per line.
+        IMPORTANT: the zarr datasets should already be in this gene order
+        after preprocessing.
+    val_path: str, optional, default: None
+        Path to folder containing all validation datasets.
+    obs_field: str, default: "celltype_name"
+        The obs key name containing celltype labels.
+    batch_size: int, default: 1000
+        Batch size.
+    num_workers: int, default: 1
+        The number of worker threads for dataloaders
+
+    Examples
+    --------
+    >>> datamodule = MetricLearningZarrDataModule(
+            batch_size=1000,
+            num_workers=1,
+            obs_field="celltype_name",
+            train_path="train",
+            gene_order="gene_order.tsv",
+        )
+    """
 
     def __init__(
         self,
@@ -66,39 +94,6 @@ class MetricLearningDataModule(pl.LightningDataModule):
         batch_size: int = 1000,
         num_workers: int = 1,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        train_path: str
-            Path to folder containing all training datasets.
-            All datasets should be in zarr format, aligned to a known gene space, and
-            cleaned to only contain valid cell ontology terms.
-        gene_order: str
-            Use a given gene order as described in the specified file. One gene
-            symbol per line.
-            IMPORTANT: the zarr datasets should already be in this gene order
-            after preprocessing.
-        val_path: str, optional, default: None
-            Path to folder containing all validation datasets.
-        obs_field: str, default: "celltype_name"
-            The obs key name containing celltype labels.
-        batch_size: int, default: 1000
-            Batch size.
-        num_workers: int, default: 1
-            The number of worker threads for dataloaders
-
-        Examples
-        --------
-        >>> datamodule = MetricLearningZarrDataModule(
-                batch_size=1000,
-                num_workers=1,
-                obs_field="celltype_name",
-                train_path="train",
-                gene_order="gene_order.tsv",
-            )
-        """
-
         super().__init__()
         self.train_path = train_path
         self.val_path = val_path

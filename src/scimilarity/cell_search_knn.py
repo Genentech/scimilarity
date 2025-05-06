@@ -4,7 +4,21 @@ from .cell_embedding import CellEmbedding
 
 
 class CellSearchKNN(CellEmbedding):
-    """A class for searching similar cells using cell embeddings kNN."""
+    """A class for searching similar cells using cell embeddings kNN.
+
+    Parameters
+    ----------
+    model_path: str
+        Path to the directory containing model files.
+    knn_type: str, default: "hnswlib"
+        What type of knn to use, options are ["hnswlib", "tiledb_vector_search"]
+    use_gpu: bool, default: False
+        Use GPU instead of CPU.
+
+    Examples
+    --------
+    >>> cs = CellSearchKNN(model_path="/opt/data/model")
+    """
 
     def __init__(
         self,
@@ -12,22 +26,6 @@ class CellSearchKNN(CellEmbedding):
         knn_type: str,
         use_gpu: bool = False,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        model_path: str
-            Path to the directory containing model files.
-        knn_type: str, default: "hnswlib"
-            What type of knn to use, options are ["hnswlib", "tiledb_vector_search"]
-        use_gpu: bool, default: False
-            Use GPU instead of CPU.
-
-        Examples
-        --------
-        >>> cs = CellSearchKNN(model_path="/opt/data/model")
-        """
-
         super().__init__(
             model_path=model_path,
             use_gpu=use_gpu,

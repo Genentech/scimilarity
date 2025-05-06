@@ -2,27 +2,25 @@ from typing import Optional, Tuple, Union
 
 
 class CellEmbedding:
-    """A class that embeds cell gene expression data using a ML model."""
+    """A class that embeds cell gene expression data using an ML model.
+
+    Parameters
+    ----------
+    model_path: str
+        Path to the directory containing model files.
+    use_gpu: bool, default: False
+        Use GPU instead of CPU.
+
+    Examples
+    --------
+    >>> ce = CellEmbedding(model_path="/opt/data/model")
+    """
 
     def __init__(
         self,
         model_path: str,
         use_gpu: bool = False,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        model_path: str
-            Path to the directory containing model files.
-        use_gpu: bool, default: False
-            Use GPU instead of CPU.
-
-        Examples
-        --------
-        >>> ce = CellEmbedding(model_path="/opt/data/model")
-        """
-
         import json
         import os
         import pandas as pd

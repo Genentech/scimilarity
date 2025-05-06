@@ -85,7 +85,8 @@ RUN pip3 install \
 	captum \
 	torch \
 	pytorch-lightning \
-    scanpy
+    scanpy \
+    scrublet
 
 # Install SCimilarity API
 RUN git clone https://github.com/Genentech/scimilarity.git /tmp/scimilarity \

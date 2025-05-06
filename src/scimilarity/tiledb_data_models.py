@@ -37,20 +37,18 @@ cfg = tiledb.Config(
 
 
 class scDataset(Dataset):
-    """A class that represents cells in TileDB."""
+    """A class that represents cells in TileDB.
+
+    Parameters
+    ----------
+    data_df: pandas.DataFrame
+        Pandas dataframe of valid cells.
+    """
 
     def __init__(
         self,
         data_df: "pandas.DataFrame",
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        data_df: pandas.DataFrame
-            Pandas dataframe of valid cells.
-        """
-
         self.data_df = data_df
 
     def __len__(self):
@@ -61,7 +59,22 @@ class scDataset(Dataset):
 
 
 class CellSampler(Sampler[int]):
-    """Sampler class for composition of cells in minibatch."""
+    """Sampler class for composition of cells in minibatch.
+
+    Parameters
+    ----------
+    data_df: pandas.DataFrame
+        DataFrame with column "sampling_weight"
+    batch_size: int
+        Batch size
+    n_batches: int
+        Number of batches to create. Should correspond to number of
+        batches per epoch, as we are sampling with replacement.
+    dynamic_weights: bool, default: False
+        Dynamically lower the sampling weight of seen cells.
+    weight_decay: float, default: 0.5
+        Weight decay factor.
+    """
 
     def __init__(
         self,
@@ -72,23 +85,6 @@ class CellSampler(Sampler[int]):
         weight_decay: float = 0.5,
         **kwargs,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        data_df: pandas.DataFrame
-            DataFrame with column "sampling_weight"
-        batch_size: int
-            Batch size
-        n_batches: int
-            Number of batches to create. Should correspond to number of
-            batches per epoch, as we are sampling with replacement.
-        dynamic_weights: bool, default: False
-            Dynamically lower the sampling weight of seen cells.
-        weight_decay: float, default: 0.5
-            Weight decay factor.
-        """
-
         super().__init__()
         self.data_df = data_df.copy()
         self.batch_size = batch_size
@@ -123,7 +119,69 @@ class CellSampler(Sampler[int]):
 
 
 class CellMultisetDataModule(pl.LightningDataModule):
-    """A class to encapsulate cells in TileDB to train the model."""
+    """A class to encapsulate cells in TileDB to train the model.
+
+    Parameters
+    ----------
+    dataset_path: str
+        Path to the directory containing the TileDB stores.
+    cell_metadata_uri: str, default: "cell_metadata"
+        Relative path to the cell metadata store.
+    gene_annotation_uri: str, default: "gene_annotation"
+        Relative path to the gene annotation store.
+    counts_uri: str, default: "counts"
+        Relative path to the counts matrix store.
+    gene_order: str
+        Use a given gene order as described in the specified file.
+        One gene symbol per line.
+    val_studies: List[str], optional, default: None
+        List of studies to use as validation and test.
+    exclude_studies: List[str], optional, default: None
+        List of studies to exclude.
+    exclude_samples: Dict[str, List[str]], optional, default: None
+        Dict of samples to exclude in the form {study: [list of samples]}.
+    label_id_column: str, default: "cellTypeOntologyID"
+        Cell ontology ID column name.
+    study_column: str, default: "datasetID"
+        Study column name.
+    sample_column: str, default: "sampleID"
+        Sample column name.
+    batch_size: int, default: 1000
+        Batch size.
+    num_workers: int, default: 1
+        The number of worker threads for dataloaders
+    lognorm: bool, default: True
+        Whether to return log normalized expression instead of raw counts.
+    target_sum: float, default: 1e4
+        Target sum for log normalization.
+    sparse: bool, default: False
+        Use sparse matrices.
+    remove_singleton_classes: bool, default: True
+        Exclude cells with classes that exist in only one study.
+    nan_string: str, default: "nan"
+        A string representing NaN.
+    sampler_cls: Sampler, default: CellSampler
+        Sampler class to use for batching.
+    dataset_cls: Dataset, default: scDataset
+        Base Dataset class to use.
+    n_batches: int, default: 100
+        Number of batches to create in batch sampler. Should correspond to number of
+        batches per epoch, as we are sampling with replacement.
+    pin_memory: bool, default: False
+        If True, uses pin memory in the DataLoaders.
+    persistent_workers: bool, default: False
+        If True, uses persistent workers in the DataLoaders.
+
+    Examples
+    --------
+    >>> datamodule = MetricLearningZarrDataModule(
+            dataset_path="/opt/cellarr_dataset"
+            label_id_column="id",
+            study_column="study",
+            batch_size=1000,
+            num_workers=1,
+        )
+    """
 
     def __init__(
         self,
@@ -152,70 +210,6 @@ class CellMultisetDataModule(pl.LightningDataModule):
         pin_memory: bool = False,
         persistent_workers: bool = False,
     ):
-        """Constructor.
-
-        Parameters
-        ----------
-        dataset_path: str
-            Path to the directory containing the TileDB stores.
-        cell_metadata_uri: str, default: "cell_metadata"
-            Relative path to the cell metadata store.
-        gene_annotation_uri: str, default: "gene_annotation"
-            Relative path to the gene annotation store.
-        counts_uri: str, default: "counts"
-            Relative path to the counts matrix store.
-        gene_order: str
-            Use a given gene order as described in the specified file.
-            One gene symbol per line.
-        val_studies: List[str], optional, default: None
-            List of studies to use as validation and test.
-        exclude_studies: List[str], optional, default: None
-            List of studies to exclude.
-        exclude_samples: Dict[str, List[str]], optional, default: None
-            Dict of samples to exclude in the form {study: [list of samples]}.
-        label_id_column: str, default: "cellTypeOntologyID"
-            Cell ontology ID column name.
-        study_column: str, default: "datasetID"
-            Study column name.
-        sample_column: str, default: "sampleID"
-            Sample column name.
-        batch_size: int, default: 1000
-            Batch size.
-        num_workers: int, default: 1
-            The number of worker threads for dataloaders
-        lognorm: bool, default: True
-            Whether to return log normalized expression instead of raw counts.
-        target_sum: float, default: 1e4
-            Target sum for log normalization.
-        sparse: bool, default: False
-            Use sparse matrices.
-        remove_singleton_classes: bool, default: True
-            Exclude cells with classes that exist in only one study.
-        nan_string: str, default: "nan"
-            A string representing NaN.
-        sampler_cls: Sampler, default: CellSampler
-            Sampler class to use for batching.
-        dataset_cls: Dataset, default: scDataset
-            Base Dataset class to use.
-        n_batches: int, default: 100
-            Number of batches to create in batch sampler. Should correspond to number of
-            batches per epoch, as we are sampling with replacement.
-        pin_memory: bool, default: False
-            If True, uses pin memory in the DataLoaders.
-        persistent_workers: bool, default: False
-            If True, uses persistent workers in the DataLoaders.
-
-        Examples
-        --------
-        >>> datamodule = MetricLearningZarrDataModule(
-                dataset_path="/opt/cellarr_dataset"
-                label_id_column="celltype_id",
-                study_column="study",
-                batch_size=1000,
-                num_workers=1,
-            )
-        """
-
         super().__init__()
         self.dataset_path = dataset_path
         self.cell_metadata_uri = cell_metadata_uri
@@ -278,8 +272,8 @@ class CellMultisetDataModule(pl.LightningDataModule):
             ].copy()
             self.data_df = self.data_df.drop(columns=":dummy:")
 
-        # manual celltype harmonization
-        self.data_df = self.harmonize_celltypes(self.data_df)
+        # manual cell type harmonization
+        self.data_df = self.harmonize_cell_types(self.data_df)
 
         self.val_df = None
         if self.val_studies is not None:
@@ -290,7 +284,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
             self.train_df = self.data_df[
                 ~self.data_df[self.study_column].isin(self.val_studies)
             ].copy()
-            # limit validation celltypes to those in the training data
+            # limit validation cell types to those in the training data
             self.val_df = self.val_df[
                 self.val_df[self.label_id_column].isin(
                     self.train_df[self.label_id_column].unique()
@@ -305,7 +299,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
             self.train_df = self.remove_singleton_label_ids(self.train_df)
             if self.val_df is not None:
                 self.val_df = self.remove_singleton_label_ids(self.val_df)
-                # limit validation celltypes to those in the training data
+                # limit validation cell types to those in the training data
                 self.val_df = self.val_df[
                     self.val_df[self.label_id_column].isin(
                         self.train_df[self.label_id_column].unique()
@@ -314,10 +308,10 @@ class CellMultisetDataModule(pl.LightningDataModule):
 
         self.label_name_column = "cellTypeName"
         self.train_df = self.get_sampler_weights(self.train_df)
-        self.train_df = self.map_celltype_id2name(self.train_df)
+        self.train_df = self.map_cell_type_id2name(self.train_df)
         if self.val_df is not None:
             self.val_df = self.get_sampler_weights(self.val_df)
-            self.val_df = self.map_celltype_id2name(self.val_df)
+            self.val_df = self.map_cell_type_id2name(self.val_df)
 
         log.info(f"Training data size: {self.train_df.shape}")
         if self.val_df is not None:
@@ -360,40 +354,77 @@ class CellMultisetDataModule(pl.LightningDataModule):
             )
             self.val_dataset = scDataset(data_df=self.val_df)
 
+        self.counts_tdb = tiledb.open(
+            os.path.join(self.dataset_path, self.counts_uri), "r", config=cfg
+        )
+        self.counts_attr = self.counts_tdb.schema.attr(0).name
+
         self.cell_tdb.close()
         self.gene_tdb.close()
 
+    def __del__(self):
+        self.counts_tdb.close()
+
     def get_data(self, filter_condition: str):
+        """Filter the tiledb cell metadata according to some filter condition and
+           return the valid cells.
+
+        Parameters
+        ----------
+        filter_condition: str
+            A string that describes the filter condition according to tiledb search syntax.
+        """
+
         return query_tiledb_df(
             self.cell_tdb,
             filter_condition,
             attrs=[self.study_column, self.sample_column, self.label_id_column],
         )
 
-    def map_celltype_id2name(self, data_df: "pandas.DataFrame"):
+    def map_cell_type_id2name(self, data_df: "pandas.DataFrame"):
+        """Map cell type ontology ID to name.
+
+        Parameters
+        ----------
+        data_df: pandas.DataFrame
+            DataFrame with a label id column and optionally a study column.
+        """
+
         onto = import_cell_ontology()
         id2name = get_id_mapper(onto)
         data_df[self.label_name_column] = data_df[self.label_id_column].map(id2name)
         data_df = data_df.dropna()
         return data_df
 
-    def remove_singleton_label_ids(self, data_df: "pandas.DataFrame"):
-        celltype_counts = (
+    def remove_singleton_label_ids(
+        self, data_df: "pandas.DataFrame", n_studies: int = 2
+    ):
+        """Ensure labels exist in at least a minimum number of studies.
+
+        Parameters
+        ----------
+        data_df: pandas.DataFrame
+            DataFrame with a label id column and optionally a study column.
+        n_studies: int, default: 2
+            The number of studies a label must exist in to be valid.
+        """
+
+        cell_type_counts = (
             data_df[[self.study_column, self.label_id_column]]
             .drop_duplicates()
             .groupby(self.label_id_column)
             .size()
             .sort_values(ascending=False)
         )
-        singleton_labels = celltype_counts[celltype_counts <= 1].index
-        well_represented_labels = celltype_counts[celltype_counts > 1].index
+        singleton_labels = cell_type_counts[cell_type_counts <= 1].index
+        well_represented_labels = cell_type_counts[cell_type_counts > 1].index
 
         # try to coarse grain singleton labels
         onto = import_cell_ontology()
         coarse_grain_dict = {label: label for label in well_represented_labels}
         for cell_type_id in singleton_labels:
             coarse_id = find_most_viable_parent(
-                onto, cell_type_id, node_list=celltype_counts.index
+                onto, cell_type_id, node_list=cell_type_counts.index
             )
             if coarse_id:
                 coarse_grain_dict[cell_type_id] = coarse_id
@@ -401,14 +432,14 @@ class CellMultisetDataModule(pl.LightningDataModule):
         data_df[self.label_id_column] = data_df[self.label_id_column].map(
             coarse_grain_dict
         )
-        celltype_counts = (
+        cell_type_counts = (
             data_df[[self.study_column, self.label_id_column]]
             .drop_duplicates()
             .groupby(self.label_id_column)
             .size()
             .sort_values(ascending=False)
         )
-        well_represented_labels = celltype_counts[celltype_counts > 1].index
+        well_represented_labels = cell_type_counts[cell_type_counts >= n_studies].index
 
         data_df = data_df[
             data_df[self.label_id_column].isin(well_represented_labels)
@@ -426,6 +457,8 @@ class CellMultisetDataModule(pl.LightningDataModule):
 
         Parameters
         ----------
+        data_df: pandas.DataFrame
+            DataFrame with a label id column and optionally a study column.
         use_study: bool, default: False
             Incorporate studies in sampler weights
         class_target_sum: float, default: 1e4
@@ -460,7 +493,15 @@ class CellMultisetDataModule(pl.LightningDataModule):
         )
         return data_df
 
-    def harmonize_celltypes(self, data_df: "pandas.DataFrame"):
+    def harmonize_cell_types(self, data_df: "pandas.DataFrame"):
+        """Manual harmonization of some cell types.
+
+        Parameters
+        ----------
+        data_df: pandas.DataFrame
+            DataFrame with a label id column.
+        """
+
         data_df[self.label_id_column] = data_df[self.label_id_column].str.replace(
             "CL:0000792",  # CD4-positive, CD25-positive, alpha-beta regulatory T cell
             "CL:0000815",  # regulatory T cell
@@ -500,15 +541,10 @@ class CellMultisetDataModule(pl.LightningDataModule):
         df = pd.concat(batch)
         cell_idx = df.index.tolist()
 
-        counts_tdb = tiledb.open(
-            os.path.join(self.dataset_path, self.counts_uri), "r", config=cfg
-        )
-        attr = counts_tdb.schema.attr(0).name
-        results = counts_tdb.multi_index[cell_idx, :]
-        counts_tdb.close()
+        results = self.counts_tdb.multi_index[cell_idx, :]
 
         counts = coo_matrix(
-            (results[attr], (results["cell_index"], results["gene_index"])),
+            (results[self.counts_attr], (results["cell_index"], results["gene_index"])),
             shape=self.matrix_shape,
         ).tocsr()
         counts = counts[cell_idx, :]
