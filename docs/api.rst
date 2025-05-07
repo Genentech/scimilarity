@@ -3,10 +3,6 @@
 API Reference
 ================================================================================
 
-.. note::
-    API documentation is under construction. Current documentation is focused
-    on core functionality.
-
 .. toctree::
     :maxdepth: 1
     :hidden:
