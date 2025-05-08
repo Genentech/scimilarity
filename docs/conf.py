@@ -74,7 +74,8 @@ nbsphinx_thumbnails = {
     'notebooks/cell_search_tutorial_2': '_static/search_thumbnail_2.png',
     'notebooks/cell_search_tutorial_3': '_static/search_thumbnail_3.png',
     'notebooks/cell_annotation_tutorial': '_static/annotation_thumbnail.png',
-    'notebooks/advanced_tutorial': '_static/advanced_thumbnail.png'
+    'notebooks/advanced_tutorial': '_static/advanced_thumbnail.png',
+    'notebooks/training_tutorial': '_static/training_thumbnail.png'
 }
 
 # Add any paths that contain templates here, relative to this directory.
