@@ -132,7 +132,7 @@ def train(args):
         exclude_samples[study].append(sample)
 
     # Set a filter condition for training cells based on columns in the CellArr cell metadata
-    filter_condition = f"datasetID!='nan' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0 and cellTypeOntologyID!='CL:0009010'" 
+    filter_condition = f"cellTypeOntologyID!='nan' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0 and cellTypeOntologyID!='CL:0009010'"
 
     datamodule = CellMultisetDataModule(
         dataset_path=tiledb_base_path,
