@@ -527,8 +527,8 @@ class CellQuery(CellSearchKNN):
 
             for row in range(nn_dist.shape[0]):
                 hits = nn_dist[row] <= max_dist
-                metadata_hits = []
                 if metadata_filter is not None:
+                    metadata_hits = []
                     for k, v in metadata_filter.items():
                         metadata_hits.append(
                             (self.cell_metadata.loc[nn_idx, k] == v).values

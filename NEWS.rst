@@ -1,6 +1,21 @@
 Release Notes
 ================================================================================
 
+Version 0.4.1:  June 20, 2025
+--------------------------------------------------------------------------------
+
+General:
+  + New utility method to help with data preprocessing:
+    ``utils.convert_id2symbol`` to map ensemble ID to gene symbol given a
+    mapping table.
+  + Updated cell annotation tutorial.
+  + Minor fixes and formatting.
+
+Training:
+  + A small refactor to the tiledb and anndata dataloaders to allow for using
+    ``spawn`` as the multiprocessing context.
+  + Various fixes to the anndata dataloader.
+
 Version 0.4.0:  May 05, 2025
 --------------------------------------------------------------------------------
 

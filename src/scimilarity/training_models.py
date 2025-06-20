@@ -234,7 +234,9 @@ class MetricLearning(pl.LightningModule):
 
         if "sparse" in dir(self.trainer.datamodule) and self.trainer.datamodule.sparse:
             cells = cells.to_dense()
+
         embedding, reconstruction = self(cells)
+
         triplet_loss, num_hard_triplets, num_viable_triplets, triplets_idx = (
             self.triplet_loss_fn(
                 embedding, labels, self.trainer.datamodule.int2label, studies

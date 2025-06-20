@@ -45,7 +45,7 @@ class scDataset(Dataset):
         data_idx = self.data_idx[idx]
         cell_idx = self.cell_idx[idx]
         return (
-            self.data_list[data_idx].get_cell(cell_idx).A,
+            self.data_list[data_idx].get_cell(cell_idx).toarray().flatten(),
             self.data_list[data_idx].get_obs(self.obs_celltype)[cell_idx],
             self.data_list[data_idx].get_obs(self.obs_study)[cell_idx],
         )
