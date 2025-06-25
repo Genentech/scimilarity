@@ -14,6 +14,7 @@ General:
 Training:
   + A small refactor to the tiledb and anndata dataloaders to allow for using
     ``spawn`` as the multiprocessing context.
+  + New scripts for training and cell annotation knn index from anndata.
   + Various fixes to the anndata dataloader.
 
 Version 0.4.0:  May 05, 2025
