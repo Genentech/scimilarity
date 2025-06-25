@@ -874,13 +874,6 @@ def pseudobulk_anndata(
     pseudobulk.obs = pseudobulk.obs.reset_index(drop=True)
     pseudobulk.obs = pd.merge(pseudobulk.obs, df_sample, on=groupby_labels)
 
-    pseudobulk.layers["counts"] = pseudobulk.layers["sum"].copy()
-    del pseudobulk.layers["sum"]
-    pseudobulk.layers["detection"] = (
-        pseudobulk.layers["count_nonzero"] / pseudobulk.obs["cells"].values[:, None]
-    )
-    del pseudobulk.layers["count_nonzero"]
-
     if min_num_cells > 1:
         pseudobulk = pseudobulk[pseudobulk.obs["cells"] >= min_num_cells].copy()
     if only_orig_genes and "uns" in dir(adata) and "orig_genes" in adata.uns:
@@ -888,8 +881,8 @@ def pseudobulk_anndata(
         not_orig_genes_idx = [
             i for i, x in enumerate(adata.var.index.tolist()) if x not in orig_genes
         ]
-        pseudobulk.layers["counts"][:, not_orig_genes_idx] = np.nan
-        pseudobulk.layers["detection"][:, not_orig_genes_idx] = np.nan
+        pseudobulk.layers["sum"][:, not_orig_genes_idx] = np.nan
+        pseudobulk.layers["count_nonzero"][:, not_orig_genes_idx] = np.nan
 
     return pseudobulk
 
