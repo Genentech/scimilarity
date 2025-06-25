@@ -11,6 +11,8 @@ cfg["sm.mem.total_budget"] = 50000000000  # 50G
 def main():
     parser = argparse.ArgumentParser(description="Build cellsearch knn from embeddings tiledb")
     parser.add_argument("-m", type=str, help="model path")
+    parser.add_argument("--cellsearch", type=str, default="cellsearch", help="relative path to the cellsearch folder")
+    parser.add_argument("--embeddings", type=str, default="cell_embedding", help="relative path to the cell embeddings folder")
     parser.add_argument("--knn_filename", type=str, default="full_kNN.bin", help="knn filename")
     parser.add_argument("--knn_type", type=str, default="tiledb_vector_search", help="Type of knn: ['hnswlib', 'tiledb_vector_search']")
     parser.add_argument("--ef_construction", type=int, default=1000, help="hnswlib ef construction parameter")
@@ -25,8 +27,8 @@ def main():
     M = args.M_construction
  
     # embeddings
-    cellsearch_path = os.path.join(model_path, "cellsearch")
-    embedding_tdb = tiledb.open(os.path.join(cellsearch_path, "cell_embedding"), "r", config=cfg)
+    cellsearch_path = os.path.join(model_path, args.cellsearch)
+    embedding_tdb = tiledb.open(os.path.join(cellsearch_path, args.embeddings), "r", config=cfg)
     attr = embedding_tdb.schema.attr(0).name
     embeddings = embedding_tdb[:][attr]
     embedding_tdb.close()

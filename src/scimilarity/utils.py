@@ -600,10 +600,10 @@ def adata_from_tiledb(
     cell_idx: Union[list, "numpy.ndarray"],
     tiledb_base_path: str,
     gene_order: Optional[List[str]] = None,
-    SAMPLEURI: str = "sample_metadata",
-    GENEURI: str = "gene_annotation",
-    CELLURI: str = "cell_metadata",
-    COUNTSURI: str = "counts",
+    sample_uri: str = "sample_metadata",
+    gene_uri: str = "gene_annotation",
+    cell_uri: str = "cell_metadata",
+    counts_uri: str = "counts",
     lognorm: bool = True,
     target_sum: float = 1e4,
     config: Optional["tiledb.ctx.Config"] = None,
@@ -618,14 +618,14 @@ def adata_from_tiledb(
         Base path of tiledb store
     gene_order: List[str], optional, default: None
         Gene order
-    SAMPLEURI: str, default: "sample_metadata"
-        Sub path of sample metadata store
-    GENEURI: str, default: "gene_annotation"
-        Sub path of gene annotation store
-    CELLURI: str, default: "cell_metadata"
-        Sub path of cell metadata store
-    COUNTSURI: str, default: "counts"
-        Sub path of count matrix store
+    sample_uri: str, default: "sample_metadata"
+        Relative path of sample metadata store
+    gene_uri: str, default: "gene_annotation"
+        Relative path of gene annotation store
+    cell_uri: str, default: "cell_metadata"
+        Relative path of cell metadata store
+    counts_uri: str, default: "counts"
+        Relative path of count matrix store
     lognorm: bool, default: True
         Whether to return log normalized expression instead of raw counts.
     target_sum: float, default: 1e4
@@ -655,7 +655,7 @@ def adata_from_tiledb(
     else:
         cfg = config
 
-    gene_tdb = tiledb.open(os.path.join(tiledb_base_path, GENEURI), "r", config=cfg)
+    gene_tdb = tiledb.open(os.path.join(tiledb_base_path, gene_uri), "r", config=cfg)
     genes = (
         gene_tdb.query(attrs=["cellarr_gene_index"])
         .df[:]["cellarr_gene_index"]
@@ -680,11 +680,13 @@ def adata_from_tiledb(
     original_idx = np.argsort(sorted_idx)
     sorted_cell_idx = cell_idx[sorted_idx]
 
-    cell_tdb = tiledb.open(os.path.join(tiledb_base_path, CELLURI), "r", config=cfg)
+    cell_tdb = tiledb.open(os.path.join(tiledb_base_path, cell_uri), "r", config=cfg)
     obs = cell_tdb.df[sorted_cell_idx]
     cell_tdb.close()
 
-    matrix_tdb = tiledb.open(os.path.join(tiledb_base_path, COUNTSURI), "r", config=cfg)
+    matrix_tdb = tiledb.open(
+        os.path.join(tiledb_base_path, counts_uri), "r", config=cfg
+    )
     attr = matrix_tdb.schema.attr(0).name
     matrix_shape = (
         matrix_tdb.nonempty_domain()[0][1] + 1,

@@ -17,6 +17,8 @@ def main():
     parser.add_argument("-t", type=str, help="tiledb base path")
     parser.add_argument("-m", type=str, help="model path")
     parser.add_argument("-b", type=int, default=100000, help="cell buffer size")
+    parser.add_argument("--cellsearch", type=str, default="cellsearch", help="relative path to the cellsearch folder")
+    parser.add_argument("--cellmetadata", type=str, default="cell_metadata", help="relative path to the cell metadata folder")
     parser.add_argument("--study_column", type=str, default="datasetID", help="study column in tiledb, will be renamed to 'study'")
     parser.add_argument("--sample_column", type=str, default="sampleID", help="sample column in tiledb, will be renamed to 'sample'")
     parser.add_argument("--tissue_column", type=str, default="tissue", help="tissue column in tiledb, will be renamed to 'tissue'")
@@ -36,8 +38,8 @@ def main():
     disease_column = args.disease_column
  
     # paths
-    CELLURI = "cell_metadata"
-    cellsearch_path = os.path.join(model_path, "cellsearch")
+    CELLURI = args.cellmetadata
+    cellsearch_path = os.path.join(model_path, args.cellsearch)
     os.makedirs(cellsearch_path, exist_ok=True)
  
     # tileDB config

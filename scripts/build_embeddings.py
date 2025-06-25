@@ -5,8 +5,6 @@ import sys
 from tqdm import tqdm
 
 import tiledb
-import tiledb.vector_search as vs
-from tiledb.vector_search import _tiledbvspy as vspy
 import numpy as np
 from scipy.sparse import coo_matrix, diags
 
@@ -52,6 +50,7 @@ def main():
     # model
     ce = CellEmbedding(model_path)
     cellsearch_path = os.path.join(model_path, "cellsearch")
+    os.makedirs(cellsearch_path, exist_ok=True)
     embedding_tdb_uri = os.path.join(cellsearch_path, "cell_embedding")
 
     # cellarr

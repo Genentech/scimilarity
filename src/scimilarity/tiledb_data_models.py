@@ -127,7 +127,7 @@ class scCollator:
     sparse: bool, default: False
         Use sparse matrices.
 
-    Static variables
+    Attributes
     ----------
     cfg: "tiledb.ctx.Config"
         TileDB configuration to increase memory budget and turn off tiledb multithreading
@@ -233,6 +233,9 @@ class CellMultisetDataModule(pl.LightningDataModule):
         Study column name.
     sample_column: str, default: "sampleID"
         Sample column name.
+    filter_condition: str, optional, default: None
+        A TileDB query string that describes conditions to select valid cells to use
+        in training. If None, it will default to: "{self.label_id_column}!='{self.nan_string}'"
     batch_size: int, default: 1000
         Batch size.
     num_workers: int, default: 5
@@ -344,7 +347,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
 
         # get data with a limit to cells with counts and labels, and QC checks
         if self.filter_condition is None:
-            self.filter_condition = f"{self.label_id_column}!='{self.nan_string}' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0"
+            self.filter_condition = f"{self.label_id_column}!='{self.nan_string}'"
         self.data_df = self.get_data(self.filter_condition)
 
         if self.exclude_studies is not None:
@@ -555,7 +558,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
         data_df: pandas.DataFrame
             DataFrame with a label id column and optionally a study column.
         use_study: bool, default: False
-            Incorporate studies in sampler weights
+            Incorporate studies in sampler weights.
         class_target_sum: float, default: 1e4
             Target sum for normalization of class counts.
         study_target_sum: float, default: 1e6

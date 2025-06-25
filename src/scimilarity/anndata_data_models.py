@@ -41,7 +41,15 @@ class scDataset(Dataset):
 
 
 class scCollator:
-    """A class to collate batch data."""
+    """A class to collate batch data.
+
+    Parameters
+    ----------
+    label2int: dict
+        A dictionary that maps string labels to class integers.
+    sparse: bool, default: False
+        Use sparse matrices.
+    """
 
     def __init__(
         self,
@@ -88,6 +96,13 @@ class MetricLearningDataModule(pl.LightningDataModule):
         Use sparse matrices.
     remove_singleton_classes: bool, default: True
         Exclude cells with classes that exist in only one study.
+    pin_memory: bool, default: False
+        If True, uses pin memory in the DataLoaders.
+    persistent_workers: bool, default: False
+        If True, uses persistent workers in the DataLoaders.
+        False if num_workers is 0.
+    multiprocessing_context: str, default: "fork"
+        Multiprocessing context for dataloaders: ["spawn", "fork"].
 
     Examples
     --------
@@ -106,7 +121,7 @@ class MetricLearningDataModule(pl.LightningDataModule):
         label_column: str = "celltype_name",
         study_column: str = "study",
         gene_order_file: Optional[str] = None,
-        batch_size: int = 500,
+        batch_size: int = 1000,
         num_workers: int = 1,
         sparse: bool = False,
         remove_singleton_classes: bool = True,
@@ -266,8 +281,14 @@ class MetricLearningDataModule(pl.LightningDataModule):
 
         Parameters
         ----------
-        dataset: scDataset
-            Single cell dataset.
+        labels: list
+            The list of labels.
+        studies: list, optional, default: None
+            A list of studies to incorporate studies in sampler weights.
+        class_target_sum: float, default: 1e4
+            Target sum for normalization of class counts.
+        study_target_sum: float, default: 1e6
+            Target sum for normalization of study counts.
 
         Returns
         -------
