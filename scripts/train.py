@@ -140,9 +140,9 @@ def train(args):
         val_studies=val_studies,
         exclude_studies=exclude_studies,
         exclude_samples=exclude_samples,
-        label_id_column="cellTypeOntologyID",
-        study_column="datasetID",
-        sample_column="sampleID",
+        label_id_column=args.label_id_column,
+        study_column=args.study_column,
+        sample_column=args.sample_column,
         filter_condition=filter_condition,
         batch_size=batch_size,
         n_batches=n_batches,
@@ -150,6 +150,7 @@ def train(args):
         sparse=False,
         remove_singleton_classes=True,
         persistent_workers=True,
+        multiprocessing_context="spawn",
     )
     print(f"Training data size: {datamodule.train_df.shape}")
     print(f"Validation data size: {datamodule.val_df.shape}")
@@ -232,6 +233,10 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description="Train SCimilarity model")
     parser.add_argument("--tiledb", type=str, help="CellArr tiledb base path")
+    parser.add_argument("--label_id_column", type=str, default="cellTypeOntologyID", help="label id column")
+    parser.add_argument("--study_column", type=str, default="datasetID", help="study column")
+    parser.add_argument("--sample_column", type=str, default="sampleID", help="sample column")
+    parser.add_argument("--gene_order", type=str, default="/home/kuot/scratch/scimilarity_gene_order.tsv", help="gene order tsv file")
     parser.add_argument("-g", type=int, default=0, help="gpu index")
     parser.add_argument("-m", type=float, default=0.05, help="triplet loss margin")
     parser.add_argument("-w", type=float, default=0.001, help="triplet loss weight")
@@ -242,7 +247,6 @@ def main():
     parser.add_argument("-l", type=float, default=0.005, help="learning rate")
     parser.add_argument("--latent_dim", type=int, default=128, help="latent space dim")
     parser.add_argument("--hidden_dim", nargs="+", type=int, default=[1024, 1024, 1024], help="list of hidden layers and sizes")
-    parser.add_argument("--gene_order", type=str, default="/home/kuot/scratch/scimilarity_gene_order.tsv", help="gene order tsv")
     parser.add_argument("--input_dropout", type=float, default=0.4, help="input layer dropout p")
     parser.add_argument("--dropout", type=float, default=0.5, help="hidden layer dropout p")
     parser.add_argument("--l1", type=float, default=1e-4, help="l1 regularization lambda")

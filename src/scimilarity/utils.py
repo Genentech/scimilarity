@@ -89,6 +89,10 @@ def align_dataset(
             f"Dataset incompatible. Gene overlap of {gene_overlap} less than {gene_overlap_threshold}. Check that var.index uses gene symbols."
         )
 
+    # check if X is None, empty csr_matrix if so
+    if data.X is None:
+        data.X = csr_matrix(data.layers["counts"].shape)
+
     # check if X is dense, convert to csr_matrix if so
     if isinstance(data.X, np.ndarray):
         data.X = csr_matrix(data.X)
@@ -186,6 +190,53 @@ def filter_cells(
     return data
 
 
+def convert_id2symbol(
+    adata: "anndata.AnnData",
+    mapping_table: str,
+):
+    """Convert EnsembleIDs to gene symbols via a mapping table.
+
+    Parameters
+    ----------
+    adata: anndata.AnnData
+        Annotated data matrix with rows for cells and columns for genes.
+    mapping_table: str
+        A tsv file in Ensemble format with gene names in column "Gene stable ID".
+
+    Returns
+    -------
+    anndata.AnnData
+        AnnData object with gene symbols as the adata.var.index.
+
+    Examples
+    --------
+    >>> adata = consolidate_duplicate_symbols(adata)
+    """
+
+    import pandas as pd
+
+    id2name = pd.read_csv(mapping_table, delimiter="\t", index_col=0, dtype="unicode")[
+        "Gene name"
+    ]
+    id2name = (
+        id2name.reset_index().drop_duplicates().set_index("Gene stable ID")["Gene name"]
+    )
+    id2name = pd.concat(
+        [id2name, pd.Series(id2name.values, index=id2name.values).drop_duplicates()]
+    )
+
+    if not any(adata.var.index.isin(id2name.keys())) and "symbol" in adata.var.columns:
+        adata.var = adata.var.set_index("symbol", drop=False)
+    adata.var.index = adata.var.index.str.replace("'", "")
+    adata.var.index = adata.var.index.str.replace('"', "")
+    adata = adata[
+        :, (adata.var.index.isin(id2name.keys())) & ~(adata.var.index.isnull())
+    ].copy()
+    adata.var.index = id2name[adata.var.index]
+    adata.var.index.name = "symbol"
+    return adata
+
+
 def consolidate_duplicate_symbols(
     adata: "anndata.AnnData",
 ) -> "anndata.AnnData":
@@ -214,6 +265,8 @@ def consolidate_duplicate_symbols(
 
     if "counts" not in adata.layers:
         raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+    if adata.X is None:
+        adata.X = csr_matrix(adata.layers["counts"].shape)
 
     gene_count = Counter(adata.var.index.values)
     dup_genes = {k for k in gene_count if gene_count[k] > 1}
@@ -249,7 +302,7 @@ def consolidate_duplicate_symbols(
 
 
 def get_centroid(
-    counts: Union["scipy.sparse.csr_matrix", "numpy.ndarray"]
+    counts: Union["scipy.sparse.csr_matrix", "numpy.ndarray"],
 ) -> "numpy.ndarray":
     """Get the centroid for a raw counts matrix.
 
@@ -547,13 +600,13 @@ def adata_from_tiledb(
     cell_idx: Union[list, "numpy.ndarray"],
     tiledb_base_path: str,
     gene_order: Optional[List[str]] = None,
-    SAMPLEURI: str = "sample_metadata",
-    GENEURI: str = "gene_annotation",
-    CELLURI: str = "cell_metadata",
-    COUNTSURI: str = "counts",
-    config: Optional["tiledb.ctx.Config"] = None,
+    sample_uri: str = "sample_metadata",
+    gene_uri: str = "gene_annotation",
+    cell_uri: str = "cell_metadata",
+    counts_uri: str = "counts",
     lognorm: bool = True,
     target_sum: float = 1e4,
+    config: Optional["tiledb.ctx.Config"] = None,
 ):
     """Constructs an AnnData object from cells in tiledb.
 
@@ -565,20 +618,20 @@ def adata_from_tiledb(
         Base path of tiledb store
     gene_order: List[str], optional, default: None
         Gene order
-    SAMPLEURI: str, default:"sample_metadata"
-        Sub path of sample metadata store
-    GENEURI: str, default:"gene_annotation"
-        Sub path of gene annotation store
-    CELLURI: str, default:"cell_metadata"
-        Sub path of cell metadata store
-    COUNTSURI: str, default:"counts"
-        Sub path of count matrix store
-    config: tiledb.ctx.Config, optional, default: None
-        Custom tiledb config
+    sample_uri: str, default: "sample_metadata"
+        Relative path of sample metadata store
+    gene_uri: str, default: "gene_annotation"
+        Relative path of gene annotation store
+    cell_uri: str, default: "cell_metadata"
+        Relative path of cell metadata store
+    counts_uri: str, default: "counts"
+        Relative path of count matrix store
     lognorm: bool, default: True
         Whether to return log normalized expression instead of raw counts.
     target_sum: float, default: 1e4
         Target sum for log normalization.
+    config: tiledb.ctx.Config, optional, default: None
+        Custom tiledb config
 
     Returns
     -------
@@ -598,12 +651,11 @@ def adata_from_tiledb(
     import tiledb
 
     if config is None:
-        cfg = tiledb.Config()
-        cfg["sm.mem.total_budget"] = 50000000000  # 50G
+        cfg = tiledb.Config({"sm.mem.total_budget": 50000000000})  # 50G
     else:
         cfg = config
 
-    gene_tdb = tiledb.open(os.path.join(tiledb_base_path, GENEURI), "r", config=cfg)
+    gene_tdb = tiledb.open(os.path.join(tiledb_base_path, gene_uri), "r", config=cfg)
     genes = (
         gene_tdb.query(attrs=["cellarr_gene_index"])
         .df[:]["cellarr_gene_index"]
@@ -628,11 +680,13 @@ def adata_from_tiledb(
     original_idx = np.argsort(sorted_idx)
     sorted_cell_idx = cell_idx[sorted_idx]
 
-    cell_tdb = tiledb.open(os.path.join(tiledb_base_path, CELLURI), "r", config=cfg)
+    cell_tdb = tiledb.open(os.path.join(tiledb_base_path, cell_uri), "r", config=cfg)
     obs = cell_tdb.df[sorted_cell_idx]
     cell_tdb.close()
 
-    matrix_tdb = tiledb.open(os.path.join(tiledb_base_path, COUNTSURI), "r", config=cfg)
+    matrix_tdb = tiledb.open(
+        os.path.join(tiledb_base_path, counts_uri), "r", config=cfg
+    )
     attr = matrix_tdb.schema.attr(0).name
     matrix_shape = (
         matrix_tdb.nonempty_domain()[0][1] + 1,
@@ -820,13 +874,6 @@ def pseudobulk_anndata(
     pseudobulk.obs = pseudobulk.obs.reset_index(drop=True)
     pseudobulk.obs = pd.merge(pseudobulk.obs, df_sample, on=groupby_labels)
 
-    pseudobulk.layers["counts"] = pseudobulk.layers["sum"].copy()
-    del pseudobulk.layers["sum"]
-    pseudobulk.layers["detection"] = (
-        pseudobulk.layers["count_nonzero"] / pseudobulk.obs["cells"].values[:, None]
-    )
-    del pseudobulk.layers["count_nonzero"]
-
     if min_num_cells > 1:
         pseudobulk = pseudobulk[pseudobulk.obs["cells"] >= min_num_cells].copy()
     if only_orig_genes and "uns" in dir(adata) and "orig_genes" in adata.uns:
@@ -834,8 +881,8 @@ def pseudobulk_anndata(
         not_orig_genes_idx = [
             i for i, x in enumerate(adata.var.index.tolist()) if x not in orig_genes
         ]
-        pseudobulk.layers["counts"][:, not_orig_genes_idx] = np.nan
-        pseudobulk.layers["detection"][:, not_orig_genes_idx] = np.nan
+        pseudobulk.layers["sum"][:, not_orig_genes_idx] = np.nan
+        pseudobulk.layers["count_nonzero"][:, not_orig_genes_idx] = np.nan
 
     return pseudobulk
 

@@ -66,7 +66,7 @@ class CellAnnotation(CellSearchKNN):
         self.blocklist = None
 
     @property
-    def classes() -> set:
+    def classes(self) -> set:
         """Get the set of all viable prediction classes."""
 
         return set(self.label2int.keys())

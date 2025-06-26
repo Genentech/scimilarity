@@ -15,6 +15,9 @@ def main():
     parser = argparse.ArgumentParser(description="Build annotation knn from precomputed embeddings")
     parser.add_argument("-m", type=str, help="model path")
     parser.add_argument("-b", type=int, default=500000, help="cell buffer size")
+    parser.add_argument("--annotation", type=str, default="annotation", help="relative path to the annotation folder")
+    parser.add_argument("--cellsearch", type=str, default="cellsearch", help="relative path to the cellsearch folder")
+    parser.add_argument("--embeddings", type=str, default="cell_embedding", help="relative path to the cell embeddings folder")
     parser.add_argument("--label_column_name", type=str, default="cellTypeName", help="label column name in metadata")
     parser.add_argument("--study_column_name", type=str, default="datasetID", help="study column name in metadata")
     parser.add_argument("--knn", type=str, default="labelled_kNN.bin", help="knn filename")
@@ -49,14 +52,14 @@ def main():
         assert reference_df.shape[0] > 0, "No valid safelist entries in data"
 
     # precomputed embeddings
-    embedding_tdb_uri = os.path.join(model_path, "cellsearch", "cell_embedding")
+    embedding_tdb_uri = os.path.join(model_path, args.cellsearch, args.embeddings)
 
     embeddings = []
     labels = []
     studies = []
     for i in tqdm(range(0, reference_df.shape[0], buffer_size)):
-        n = min(i + buffer_size, reference_df.shape[0])
-        df = reference_df.iloc[range(i, n)].copy()
+        j = min(i + buffer_size, reference_df.shape[0])
+        df = reference_df.iloc[slice(i, j)].copy()
 
         embedding_tdb = tiledb.open(embedding_tdb_uri, "r", config=cfg)
         cell_idx = df.index.tolist()
@@ -69,7 +72,7 @@ def main():
     embeddings = np.vstack(embeddings) 
     print("embeddings", embeddings.shape)
 
-    annotation_path = os.path.join(model_path, "annotation")
+    annotation_path = os.path.join(model_path, args.annotation)
     os.makedirs(annotation_path, exist_ok=True)
 
     # save labels

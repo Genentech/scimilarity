@@ -2,7 +2,6 @@ import numpy as np
 import os, re
 import pandas as pd
 import pytorch_lightning as pl
-import random
 from scipy.sparse import coo_matrix, diags
 import tiledb
 import torch
@@ -14,26 +13,11 @@ from .ontologies import (
     import_cell_ontology,
     get_id_mapper,
     find_most_viable_parent,
-    get_all_ancestors,
 )
 
 import logging
 
 log = logging.getLogger(__name__)
-
-cfg = tiledb.Config(
-    {
-        "sm.mem.total_budget": 50000000000,  # 50G
-        # turn off tiledb multithreading
-        "sm.compute_concurrency_level": 1,
-        "sm.io_concurrency_level": 1,
-        "sm.num_async_threads": 1,
-        "sm.num_reader_threads": 1,
-        "sm.num_tbb_threads": 1,
-        "sm.num_writer_threads": 1,
-        "vfs.num_threads": 1,
-    }
-)
 
 
 class scDataset(Dataset):
@@ -58,7 +42,7 @@ class scDataset(Dataset):
         return self.data_df.loc[[idx]].copy()
 
 
-class CellSampler(Sampler[int]):
+class scSampler(Sampler[int]):
     """Sampler class for composition of cells in minibatch.
 
     Parameters
@@ -92,30 +76,133 @@ class CellSampler(Sampler[int]):
         self.dynamic_weights = dynamic_weights
         self.weight_decay = weight_decay
 
+        if self.dynamic_weights:
+            self.weight_col = "dynamic_weights"
+            self.data_df[self.weight_col] = self.data_df["sampling_weight"]
+        else:
+            self.weight_col = "sampling_weight"
+        self.weights = (
+            self.data_df[self.weight_col].values
+            / self.data_df[self.weight_col].values.sum()
+        )
+
     def __len__(self) -> int:
         return self.n_batches
 
     def __iter__(self):
-        if self.dynamic_weights:
-            col = "dynamic_weights"
-            self.data_df[col] = self.data_df["sampling_weight"]
-        else:
-            col = "sampling_weight"
-
-        a = self.data_df.index.values
-        weights = self.data_df[col].values / self.data_df[col].values.sum()
         for _ in range(self.n_batches):
             batch = np.random.choice(
-                a, size=self.batch_size, replace=False, p=weights
-            ).tolist()
+                self.data_df.index.values,
+                size=self.batch_size,
+                replace=False,
+                p=self.weights,
+            )
             if self.dynamic_weights:
                 # lower the weight of previously sampled cells
-                affected_cells = batch.index.values
-                self.data_df.loc[affected_cells, col] = max(
-                    self.data_df.loc[affected_cells, col] * weight_decay, 0.01
+                self.data_df.loc[batch, self.weight_col] = max(
+                    self.data_df.loc[batch, self.weight_col] * self.weight_decay, 0.01
                 )
-                weights = self.data_df[col].values / self.data_df[col].values.sum()
+                self.weights = (
+                    self.data_df[self.weight_col].values
+                    / self.data_df[self.weight_col].values.sum()
+                )
             yield batch
+
+
+class scCollator:
+    """A class to collate data by retrieving from tiledb.
+
+    Parameters
+    ----------
+    counts_uri: str
+        Path to the counts matrix store.
+    gene_indices: List[int]
+        The indices of a gene order relative to gene annotation store.
+    study_column: str
+        Study column name.
+    lognorm: bool, default: True
+        Whether to return log normalized expression instead of raw counts.
+    target_sum: float, default: 1e4
+        Target sum for log normalization.
+    sparse: bool, default: False
+        Use sparse matrices.
+
+    Attributes
+    ----------
+    cfg: "tiledb.ctx.Config"
+        TileDB configuration to increase memory budget and turn off tiledb multithreading
+    """
+
+    cfg = tiledb.Config(
+        {
+            "sm.mem.total_budget": 50000000000,  # 50G
+            # turn off tiledb multithreading
+            "sm.compute_concurrency_level": 1,
+            "sm.io_concurrency_level": 1,
+            "sm.num_async_threads": 1,
+            "sm.num_reader_threads": 1,
+            "sm.num_tbb_threads": 1,
+            "sm.num_writer_threads": 1,
+            "vfs.num_threads": 1,
+        }
+    )
+
+    def __init__(
+        self,
+        counts_uri: str,
+        gene_indices: List[int],
+        study_column: str,
+        lognorm: bool = True,
+        target_sum: float = 1e4,
+        sparse: bool = False,
+    ):
+        self.counts_uri = counts_uri
+        self.gene_indices = gene_indices
+        self.study_column = study_column
+        self.lognorm = lognorm
+        self.target_sum = target_sum
+        self.sparse = sparse
+
+        self.counts_tdb = tiledb.open(self.counts_uri, "r", config=scCollator.cfg)
+        self.counts_attr = self.counts_tdb.schema.attr(0).name
+        self.matrix_shape = (
+            self.counts_tdb.nonempty_domain()[0][1] + 1,
+            self.counts_tdb.nonempty_domain()[1][1] + 1,
+        )
+
+    def __del__(self):
+        self.counts_tdb.close()
+
+    def __call__(self, batch):
+        df = pd.concat(batch)
+        cell_idx = df.index.tolist()
+
+        results = self.counts_tdb.multi_index[cell_idx, :]
+        counts = coo_matrix(
+            (results[self.counts_attr], (results["cell_index"], results["gene_index"])),
+            shape=self.matrix_shape,
+        ).tocsr()
+        counts = counts[cell_idx, :]
+        counts = counts[:, self.gene_indices]
+
+        X = counts.astype(np.float32)
+        if self.lognorm:
+            # normalize to target sum
+            row_sums = np.ravel(X.sum(axis=1))  # row sums as a 1D array
+            # avoid division by zero by setting zero sums to one (they will remain zero after normalization)
+            row_sums[row_sums == 0] = 1
+            # create a sparse diagonal matrix with the inverse of the row sums
+            inv_row_sums = diags(1 / row_sums).tocsr()
+            # normalize the rows to sum to 1
+            normalized_matrix = inv_row_sums.dot(X)
+            # scale the rows sum to target_sum
+            X = normalized_matrix.multiply(self.target_sum)
+            X = X.log1p()
+
+        X = torch.Tensor(X.toarray())
+        if self.sparse:
+            X = X.to_sparse()
+        return (X, torch.Tensor(df["label_int"].values), df[self.study_column].values)
 
 
 class CellMultisetDataModule(pl.LightningDataModule):
@@ -146,10 +233,16 @@ class CellMultisetDataModule(pl.LightningDataModule):
         Study column name.
     sample_column: str, default: "sampleID"
         Sample column name.
+    filter_condition: str, optional, default: None
+        A TileDB query string that describes conditions to select valid cells to use
+        in training. If None, it will default to: "{self.label_id_column}!='{self.nan_string}'"
     batch_size: int, default: 1000
         Batch size.
-    num_workers: int, default: 1
+    num_workers: int, default: 5
         The number of worker threads for dataloaders
+    n_batches: int, default: 100
+        Number of batches to create in batch sampler. Should correspond to number of
+        batches per epoch, as we are sampling with replacement.
     lognorm: bool, default: True
         Whether to return log normalized expression instead of raw counts.
     target_sum: float, default: 1e4
@@ -160,17 +253,19 @@ class CellMultisetDataModule(pl.LightningDataModule):
         Exclude cells with classes that exist in only one study.
     nan_string: str, default: "nan"
         A string representing NaN.
-    sampler_cls: Sampler, default: CellSampler
+    sampler_cls: Sampler, default: scSampler
         Sampler class to use for batching.
     dataset_cls: Dataset, default: scDataset
         Base Dataset class to use.
-    n_batches: int, default: 100
-        Number of batches to create in batch sampler. Should correspond to number of
-        batches per epoch, as we are sampling with replacement.
+    collator_cls: type, default: scCollator
+        Collator class to use to collect data from tiledb.
     pin_memory: bool, default: False
         If True, uses pin memory in the DataLoaders.
     persistent_workers: bool, default: False
         If True, uses persistent workers in the DataLoaders.
+        False if num_workers is 0.
+    multiprocessing_context: str, default: "fork"
+        Multiprocessing context for dataloaders: ["spawn", "fork"].
 
     Examples
     --------
@@ -198,17 +293,19 @@ class CellMultisetDataModule(pl.LightningDataModule):
         sample_column: str = "sampleID",
         filter_condition: Optional[str] = None,
         batch_size: int = 1000,
-        num_workers: int = 0,
+        num_workers: int = 5,
+        n_batches: int = 100,
         lognorm: bool = True,
         target_sum: float = 1e4,
         sparse: bool = False,
         remove_singleton_classes: bool = True,
         nan_string: str = "nan",
-        sampler_cls: Sampler = CellSampler,
+        sampler_cls: Sampler = scSampler,
         dataset_cls: Dataset = scDataset,
-        n_batches: int = 100,
+        collator_cls: type = scCollator,
         pin_memory: bool = False,
         persistent_workers: bool = False,
+        multiprocessing_context: str = "fork",
     ):
         super().__init__()
         self.dataset_path = dataset_path
@@ -224,6 +321,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
         self.filter_condition = filter_condition
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.n_batches = n_batches
         self.lognorm = lognorm
         self.target_sum = target_sum
         self.sparse = sparse
@@ -231,11 +329,14 @@ class CellMultisetDataModule(pl.LightningDataModule):
         self.nan_string = nan_string
         self.sampler_cls = sampler_cls
         self.dataset_cls = dataset_cls
-        self.n_batches = n_batches
+        self.collator_cls = collator_cls
         self.pin_memory = pin_memory
         self.persistent_workers = persistent_workers
+        self.multiprocessing_context = multiprocessing_context
         if self.sparse:
             self.pin_memory = False
+        if self.num_workers == 0:
+            self.persistent_workers = False
 
         self.cell_tdb = tiledb.open(
             os.path.join(self.dataset_path, self.cell_metadata_uri), "r"
@@ -244,20 +345,16 @@ class CellMultisetDataModule(pl.LightningDataModule):
             os.path.join(self.dataset_path, self.gene_annotation_uri), "r"
         )
 
-        self.matrix_shape = (
-            self.cell_tdb.nonempty_domain()[0][1] + 1,
-            self.gene_tdb.nonempty_domain()[0][1] + 1,
-        )
-
         # get data with a limit to cells with counts and labels, and QC checks
         if self.filter_condition is None:
-            self.filter_condition = f"{self.label_id_column}!='{self.nan_string}' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0"
+            self.filter_condition = f"{self.label_id_column}!='{self.nan_string}'"
         self.data_df = self.get_data(self.filter_condition)
 
         if self.exclude_studies is not None:
             self.data_df = self.data_df[
                 ~self.data_df[self.study_column].isin(self.exclude_studies)
             ].copy()
+
         if self.exclude_samples is not None:
             self.data_df[":dummy:"] = (
                 self.data_df[self.study_column]
@@ -345,25 +442,26 @@ class CellMultisetDataModule(pl.LightningDataModule):
         self.train_df["label_int"] = self.train_df[self.label_name_column].map(
             self.label2int
         )
-        self.train_dataset = scDataset(data_df=self.train_df)
+        self.train_dataset = dataset_cls(data_df=self.train_df)
 
         self.val_dataset = None
         if self.val_df is not None:
             self.val_df["label_int"] = self.val_df[self.label_name_column].map(
                 self.label2int
             )
-            self.val_dataset = scDataset(data_df=self.val_df)
+            self.val_dataset = dataset_cls(data_df=self.val_df)
 
-        self.counts_tdb = tiledb.open(
-            os.path.join(self.dataset_path, self.counts_uri), "r", config=cfg
+        self.collator = collator_cls(
+            counts_uri=os.path.join(self.dataset_path, self.counts_uri),
+            gene_indices=self.gene_indices,
+            study_column=self.study_column,
+            lognorm=self.lognorm,
+            target_sum=self.target_sum,
+            sparse=self.sparse,
         )
-        self.counts_attr = self.counts_tdb.schema.attr(0).name
 
         self.cell_tdb.close()
         self.gene_tdb.close()
-
-    def __del__(self):
-        self.counts_tdb.close()
 
     def get_data(self, filter_condition: str):
         """Filter the tiledb cell metadata according to some filter condition and
@@ -460,7 +558,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
         data_df: pandas.DataFrame
             DataFrame with a label id column and optionally a study column.
         use_study: bool, default: False
-            Incorporate studies in sampler weights
+            Incorporate studies in sampler weights.
         class_target_sum: float, default: 1e4
             Target sum for normalization of class counts.
         study_target_sum: float, default: 1e6
@@ -524,51 +622,6 @@ class CellMultisetDataModule(pl.LightningDataModule):
         )
         return data_df
 
-    def collate(self, batch):
-        """Collate tensors.
-
-        Parameters
-        ----------
-        batch:
-            Batch to collate.
-
-        Returns
-        -------
-        tuple
-            Gene expression, labels, and studies
-        """
-
-        df = pd.concat(batch)
-        cell_idx = df.index.tolist()
-
-        results = self.counts_tdb.multi_index[cell_idx, :]
-
-        counts = coo_matrix(
-            (results[self.counts_attr], (results["cell_index"], results["gene_index"])),
-            shape=self.matrix_shape,
-        ).tocsr()
-        counts = counts[cell_idx, :]
-        counts = counts[:, self.gene_indices]
-
-        X = counts.astype(np.float32)
-        if self.lognorm:
-            # normalize to target sum
-            row_sums = np.ravel(X.sum(axis=1))  # row sums as a 1D array
-            # avoid division by zero by setting zero sums to one (they will remain zero after normalization)
-            row_sums[row_sums == 0] = 1
-            # create a sparse diagonal matrix with the inverse of the row sums
-            inv_row_sums = diags(1 / row_sums).tocsr()
-            # normalize the rows to sum to 1
-            normalized_matrix = inv_row_sums.dot(X)
-            # scale the rows sum to target_sum
-            X = normalized_matrix.multiply(self.target_sum)
-            X = X.log1p()
-
-        X = torch.Tensor(X.toarray())
-        if self.sparse:
-            X = X.to_sparse()
-        return (X, torch.Tensor(df["label_int"].values), df[self.study_column].values)
-
     def train_dataloader(self) -> DataLoader:
         """Load the training dataset.
 
@@ -578,7 +631,7 @@ class CellMultisetDataModule(pl.LightningDataModule):
             A DataLoader object containing the training dataset.
         """
 
-        self.train_sampler = self.sampler_cls(
+        train_sampler = self.sampler_cls(
             data_df=self.train_df,
             batch_size=self.batch_size,
             n_batches=self.n_batches,
@@ -586,11 +639,11 @@ class CellMultisetDataModule(pl.LightningDataModule):
         return DataLoader(
             self.train_dataset,
             num_workers=self.num_workers,
-            collate_fn=self.collate,
+            collate_fn=self.collator,
             pin_memory=self.pin_memory,
-            batch_sampler=self.train_sampler,
+            batch_sampler=train_sampler,
             persistent_workers=self.persistent_workers,
-            multiprocessing_context="fork",
+            multiprocessing_context=self.multiprocessing_context,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -604,7 +657,8 @@ class CellMultisetDataModule(pl.LightningDataModule):
 
         if self.val_dataset is None:
             return None
-        self.val_sampler = self.sampler_cls(
+
+        val_sampler = self.sampler_cls(
             data_df=self.val_df,
             batch_size=self.batch_size,
             n_batches=self.n_batches,
@@ -612,11 +666,11 @@ class CellMultisetDataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_dataset,
             num_workers=self.num_workers,
-            collate_fn=self.collate,
+            collate_fn=self.collator,
             pin_memory=self.pin_memory,
-            batch_sampler=self.val_sampler,
+            batch_sampler=val_sampler,
             persistent_workers=self.persistent_workers,
-            multiprocessing_context="fork",
+            multiprocessing_context=self.multiprocessing_context,
         )
 
     def test_dataloader(self) -> DataLoader:
