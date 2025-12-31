@@ -30,8 +30,8 @@ Pretrained model weights, embeddings, kNN graphs, a single-cell metadata
 can be downloaded from:
 https://zenodo.org/records/10685499
 
-Human tissue atlas scRNA-seq data (train, test, and unlabelled) with metadata
-and SCimilarity embeddings can be downloaded from:
+Human tissue atlas scRNA-seq data with metadata and SCimilarity embeddings can
+be downloaded from:
 https://zenodo.org/records/10895214
 
 Citation
