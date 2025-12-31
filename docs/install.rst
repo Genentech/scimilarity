@@ -48,6 +48,14 @@ You can download the following pretrained models for use with SCimilarity from
 Zenodo:
 https://zenodo.org/records/10685499
 
+Downloading reference datasets
+--------------------------------------------------------------------------------
+
+Human scRNA-seq tissue atlases with metadata and SCimilarity embeddings can be
+downloaded from the following link. This corpus includes the *in vivo* train,
+test, and unlabeled data associated with the v1.1 human SCimilarity model,
+organized by organ system:
+https://zenodo.org/records/10895214
 
 Conda environment setup
 --------------------------------------------------------------------------------

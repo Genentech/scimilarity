@@ -23,12 +23,16 @@ The latest API release can be installed from PyPI::
 
     pip install scimilarity
 
+A docker container with SCimilarity preinstalled can be pulled from:
+https://ghcr.io/genentech/scimilarity
+
 Pretrained model weights, embeddings, kNN graphs, a single-cell metadata
 can be downloaded from:
 https://zenodo.org/records/10685499
 
-A docker container with SCimilarity preinstalled can be pulled from:
-https://ghcr.io/genentech/scimilarity
+Human tissue atlas scRNA-seq data (train, test, and unlabelled) with metadata
+and SCimilarity embeddings can be downloaded from:
+https://zenodo.org/records/10895214
 
 Citation
 --------------------------------------------------------------------------------
