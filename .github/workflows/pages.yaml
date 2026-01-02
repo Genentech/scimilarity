@@ -38,12 +38,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: clean
-    container:
-      image: ghcr.io/genentech/scimilarity:latest
+    #container:
+    #  image: ghcr.io/genentech/scimilarity:latest
     steps:
       - uses: actions/checkout@v3
       - name: Install dependencies
         run: |
+          pip install sphinx
           pip install -r docs/requirements.txt
       - name: Setup Pages
         id: pages
