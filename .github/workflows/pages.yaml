@@ -45,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt install pandoc
-          pip install sphinx
+          pip install sphinx ipykernel
           pip install -r docs/requirements.txt
       - name: Setup Pages
         id: pages
