@@ -25,10 +25,19 @@ jobs:
       - name: Docker clean up
         run: |
           docker system prune -af
+      - name: Delete files
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache/go
+          sudo rm -rf /tmp/*
+      - name: Usage
+        run: |
           df -h
   # Build job
   build:
     runs-on: ubuntu-latest
+    needs: clean
     container:
       image: ghcr.io/genentech/scimilarity:latest
     steps:
