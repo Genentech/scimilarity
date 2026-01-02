@@ -18,6 +18,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Clean up disk space
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker clean up
+        run: |
+          docker system prune -af
+          df -h
   # Build job
   build:
     runs-on: ubuntu-latest
