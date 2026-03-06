@@ -1,12 +1,12 @@
 import numpy as np
-import os, re
+import os
 import pandas as pd
 import pytorch_lightning as pl
 from scipy.sparse import coo_matrix, diags
 import tiledb
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from .utils import query_tiledb_df
 from .ontologies import (
@@ -18,6 +18,10 @@ from .ontologies import (
 import logging
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    import torch
+    import pandas
 
 
 class scDataset(Dataset):

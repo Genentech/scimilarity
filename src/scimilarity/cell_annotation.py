@@ -1,6 +1,11 @@
-from typing import Optional, Union, List, Set, Tuple
+from typing import Optional, Union, List, Set, Tuple, TYPE_CHECKING
 
 from .cell_search_knn import CellSearchKNN
+
+if TYPE_CHECKING:
+    import anndata
+    import numpy
+    import pandas
 
 
 class CellAnnotation(CellSearchKNN):

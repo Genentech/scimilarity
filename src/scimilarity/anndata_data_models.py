@@ -1,10 +1,11 @@
 import anndata
 from collections import Counter
+from anndata.abc import Index
 import numpy as np
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, Any, Union
 
 from .utils import align_dataset
 from .ontologies import (
@@ -12,6 +13,9 @@ from .ontologies import (
     get_id_mapper,
     find_most_viable_parent,
 )
+
+if TYPE_CHECKING:
+    import numpy
 
 
 class scDataset(Dataset):
@@ -27,7 +31,12 @@ class scDataset(Dataset):
         The study identifier for every cell.
     """
 
-    def __init__(self, X, Y, study=None):
+    def __init__(
+        self,
+        X: "numpy.ndarray",
+        Y: "numpy.ndarray",
+        study: Optional["numpy.ndarray"] = None,
+    ):
         self.X = X
         self.Y = Y
         self.study = study
@@ -35,7 +44,7 @@ class scDataset(Dataset):
     def __len__(self):
         return len(self.Y)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: Index) -> tuple:
         # data, label, study
         return self.X[idx].toarray().flatten(), self.Y[idx], self.study[idx]
 

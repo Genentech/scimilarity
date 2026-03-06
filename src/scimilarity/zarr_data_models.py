@@ -15,7 +15,7 @@ class scDataset(Dataset):
 
     Parameters
     ----------
-    data_list: list
+    data_list: list[ZarrDataset]
         List of single-cell datasets.
     obs_celltype: str, default: "celltype_name"
         Cell type name.
@@ -23,7 +23,12 @@ class scDataset(Dataset):
         Study name.
     """
 
-    def __init__(self, data_list, obs_celltype="celltype_name", obs_study="study"):
+    def __init__(
+        self,
+        data_list: list[ZarrDataset],
+        obs_celltype: str = "celltype_name",
+        obs_study: str = "study",
+    ):
         self.data_list = data_list
         self.ncells_list = [data.shape[0] for data in data_list]
         self.ncells = sum(self.ncells_list)
@@ -40,7 +45,7 @@ class scDataset(Dataset):
     def __len__(self):
         return self.ncells
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         # data, label, study
         data_idx = self.data_idx[idx]
         cell_idx = self.cell_idx[idx]

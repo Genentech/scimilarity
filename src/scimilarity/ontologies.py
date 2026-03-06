@@ -1,7 +1,11 @@
 import networkx as nx
 import obonet
 import pandas as pd
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas
+    import numpy
 
 
 def subset_nodes_to_set(nodes, restricted_set: Union[list, set]) -> nx.DiGraph:

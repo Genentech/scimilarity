@@ -1,4 +1,10 @@
-from typing import Optional, Tuple, Union
+from __future__ import annotations
+
+from typing import Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import scipy.sparse
+    import numpy
 
 
 class CellEmbedding:
@@ -112,9 +118,9 @@ class CellEmbedding:
         if (
             (isinstance(X, csr_matrix) or isinstance(X, csc_matrix))
             and (
-                isinstance(X.data, zarr.core.Array)
-                or isinstance(X.indices, zarr.core.Array)
-                or isinstance(X.indptr, zarr.core.Array)
+                isinstance(X.data, zarr.Array)
+                or isinstance(X.indices, zarr.Array)
+                or isinstance(X.indptr, zarr.Array)
             )
             and num_cells <= buffer_size
         ):
@@ -141,7 +147,7 @@ class CellEmbedding:
                 embedding_parts.append(self.model(profiles))
 
         if not embedding_parts:
-            raise RuntimeError(f"No valid cells detected.")
+            raise RuntimeError("No valid cells detected.")
 
         if self.use_gpu:
             # detach, move from gpu into cpu, return as numpy array
@@ -151,6 +157,6 @@ class CellEmbedding:
             embedding = torch.vstack(embedding_parts).detach().numpy()
 
         if np.isnan(embedding).any():
-            raise RuntimeError(f"NaN detected in embeddings.")
+            raise RuntimeError("NaN detected in embeddings.")
 
         return embedding

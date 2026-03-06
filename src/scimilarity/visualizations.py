@@ -1,4 +1,7 @@
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas
 
 
 def aggregate_counts(data: "pandas.DataFrame", levels: List[str]) -> dict:
@@ -91,9 +94,7 @@ def assign_size(
         .sum()
         .reset_index(name="count")
     )
-    for (
-        r
-    ) in (
+    for r in (
         df.index
     ):  # find the deepest levels in data_dict and create an entry with (name, size)
         entry = data_dict[df.iloc[r, 0]]
@@ -284,7 +285,7 @@ def draw_circles(
 
     try:
         import circlify as circ
-    except:
+    except Exception:
         raise ImportError(
             "Package 'circlify' not found. Please install with 'pip install circlify'."
         )

@@ -1,5 +1,11 @@
 from torch import nn
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
+    import numpy
+    import pandas
+    import scipy.sparse
 
 
 class SimpleDist(nn.Module):

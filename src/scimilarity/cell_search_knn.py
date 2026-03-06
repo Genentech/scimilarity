@@ -1,6 +1,9 @@
-from typing import Optional, Tuple, Union
+from typing import Tuple, TYPE_CHECKING
 
 from .cell_embedding import CellEmbedding
+
+if TYPE_CHECKING:
+    import numpy
 
 
 class CellSearchKNN(CellEmbedding):

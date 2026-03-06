@@ -1,30 +1,76 @@
-import anndata
 import argparse
 import hnswlib
-import os, sys
+import os
 import numpy as np
 import pandas as pd
 import tiledb
 from tqdm import tqdm
 
 import warnings
+
 warnings.filterwarnings("ignore")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build annotation knn from precomputed embeddings")
+    parser = argparse.ArgumentParser(
+        description="Build annotation knn from precomputed embeddings"
+    )
     parser.add_argument("-m", type=str, help="model path")
     parser.add_argument("-b", type=int, default=500000, help="cell buffer size")
-    parser.add_argument("--annotation", type=str, default="annotation", help="relative path to the annotation folder")
-    parser.add_argument("--cellsearch", type=str, default="cellsearch", help="relative path to the cellsearch folder")
-    parser.add_argument("--embeddings", type=str, default="cell_embedding", help="relative path to the cell embeddings folder")
-    parser.add_argument("--label_column_name", type=str, default="cellTypeName", help="label column name in metadata")
-    parser.add_argument("--study_column_name", type=str, default="datasetID", help="study column name in metadata")
-    parser.add_argument("--knn", type=str, default="labelled_kNN.bin", help="knn filename")
-    parser.add_argument("--labels", type=str, default="reference_labels.tsv", help="labels filename")
-    parser.add_argument("--safelist_file", type=str, default=None, help="optional cell type safelist filename")
-    parser.add_argument("--ef_construction", type=int, default=1000, help="hnswlib ef construction parameter")
-    parser.add_argument("--M_construction", type=int, default=80, help="hnswlib M construction parameter")
+    parser.add_argument(
+        "--annotation",
+        type=str,
+        default="annotation",
+        help="relative path to the annotation folder",
+    )
+    parser.add_argument(
+        "--cellsearch",
+        type=str,
+        default="cellsearch",
+        help="relative path to the cellsearch folder",
+    )
+    parser.add_argument(
+        "--embeddings",
+        type=str,
+        default="cell_embedding",
+        help="relative path to the cell embeddings folder",
+    )
+    parser.add_argument(
+        "--label_column_name",
+        type=str,
+        default="cellTypeName",
+        help="label column name in metadata",
+    )
+    parser.add_argument(
+        "--study_column_name",
+        type=str,
+        default="datasetID",
+        help="study column name in metadata",
+    )
+    parser.add_argument(
+        "--knn", type=str, default="labelled_kNN.bin", help="knn filename"
+    )
+    parser.add_argument(
+        "--labels", type=str, default="reference_labels.tsv", help="labels filename"
+    )
+    parser.add_argument(
+        "--safelist_file",
+        type=str,
+        default=None,
+        help="optional cell type safelist filename",
+    )
+    parser.add_argument(
+        "--ef_construction",
+        type=int,
+        default=1000,
+        help="hnswlib ef construction parameter",
+    )
+    parser.add_argument(
+        "--M_construction",
+        type=int,
+        default=80,
+        help="hnswlib M construction parameter",
+    )
     args = parser.parse_args()
     print(args)
 
@@ -36,7 +82,7 @@ def main():
     label_filename = args.labels
     ef_construction = args.ef_construction
     M = args.M_construction
- 
+
     # tileDB config
     cfg = tiledb.Config()
     cfg["sm.mem.total_budget"] = 50000000000  # 50G
@@ -48,7 +94,9 @@ def main():
     if args.safelist_file is not None:
         with open(args.safelist_file, "r") as fh:
             safelist = [line.strip() for line in fh]
-        reference_df = reference_df[reference_df[label_column_name].isin(safelist)].copy()
+        reference_df = reference_df[
+            reference_df[label_column_name].isin(safelist)
+        ].copy()
         assert reference_df.shape[0] > 0, "No valid safelist entries in data"
 
     # precomputed embeddings
@@ -64,12 +112,14 @@ def main():
         embedding_tdb = tiledb.open(embedding_tdb_uri, "r", config=cfg)
         cell_idx = df.index.tolist()
         attr = embedding_tdb.schema.attr(0).name
-        embedding = embedding_tdb.query(attrs=[attr], coords=True).multi_index[cell_idx][attr]
+        embedding = embedding_tdb.query(attrs=[attr], coords=True).multi_index[
+            cell_idx
+        ][attr]
         embedding_tdb.close()
         embeddings.append(embedding)
         labels.extend(df[label_column_name].tolist())
         studies.extend(df[study_column_name].tolist())
-    embeddings = np.vstack(embeddings) 
+    embeddings = np.vstack(embeddings)
     print("embeddings", embeddings.shape)
 
     annotation_path = os.path.join(model_path, args.annotation)
