@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Union, TYPE_CHECKING
 
 if TYPE_CHECKING:

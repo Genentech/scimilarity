@@ -20,7 +20,6 @@ import logging
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    import torch
     import pandas
 
 
@@ -33,10 +32,7 @@ class scDataset(Dataset):
         Pandas dataframe of valid cells.
     """
 
-    def __init__(
-        self,
-        data_df: "pandas.DataFrame",
-    ):
+    def __init__(self, data_df: "pandas.DataFrame"):
         self.data_df = data_df
 
     def __len__(self):

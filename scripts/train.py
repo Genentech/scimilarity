@@ -1,5 +1,4 @@
-import os
-import sys
+import os, sys
 import argparse
 import json
 import tiledb
@@ -79,16 +78,18 @@ def train(args):
 
     if cosine_annealing_tmax == 0:
         cosine_annealing_tmax = max_epochs
-
-    model_name = f"model_{batch_size}_{margin}_{latent_dim}_{len(hidden_dim)}_{triplet_loss_weight}_{suffix}"
-
+    
+    model_name = (
+        f"model_{batch_size}_{margin}_{latent_dim}_{len(hidden_dim)}_{triplet_loss_weight}_{suffix}"
+    )
+    
     model_folder = args.model_folder
     os.makedirs(model_folder, exist_ok=True)
     log_folder = args.log_folder
     os.makedirs(log_folder, exist_ok=True)
     result_folder = os.path.join(args.result_folder, model_name)
     os.makedirs(result_folder, exist_ok=True)
-
+ 
     print(model_name)
     print(args)
     if os.path.isdir(os.path.join(model_folder, model_name)):
@@ -131,7 +132,7 @@ def train(args):
         exclude_samples[study].append(sample)
 
     # Set a filter condition for training cells based on columns in the CellArr cell metadata
-    filter_condition = "cellTypeOntologyID!='nan' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0 and cellTypeOntologyID!='CL:0009010'"
+    filter_condition = f"cellTypeOntologyID!='nan' and total_counts>1000 and n_genes_by_counts>500 and pct_counts_mt<20 and predicted_doublets==0 and cellTypeOntologyID!='CL:0009010'"
 
     datamodule = CellMultisetDataModule(
         dataset_path=tiledb_base_path,
@@ -171,7 +172,7 @@ def train(args):
         l2=args.l2,
         max_epochs=max_epochs,
         cosine_annealing_tmax=cosine_annealing_tmax,
-        # track_triplets=result_folder, # uncomment this to track triplet compositions per step
+        #track_triplets=result_folder, # uncomment this to track triplet compositions per step
     )
 
     # Use tensorboard to log training. Modify this based on your preferred logger.
@@ -206,7 +207,7 @@ def train(args):
     trainer = pl.Trainer(**params)
 
     ckpt_path = os.path.join(log_folder, model_name, suffix, "checkpoints")
-    if os.path.isdir(ckpt_path):  # resume training if checkpoints exist
+    if os.path.isdir(ckpt_path): # resume training if checkpoints exist
         ckpt_files = sorted(
             [x for x in os.listdir(ckpt_path) if x.endswith(".ckpt")],
             key=lambda x: int(x.replace(".ckpt", "").split("=")[-1]),
@@ -224,9 +225,7 @@ def train(args):
     if result_folder is not None:
         test_results = trainer.test(model, datamodule=datamodule)
         if test_results:
-            with open(
-                os.path.join(result_folder, f"{model_name}.test.json"), "w+"
-            ) as fh:
+            with open(os.path.join(result_folder, f"{model_name}.test.json"), "w+") as fh:
                 fh.write(json.dumps(test_results[0]))
     print(model_name)
 
@@ -234,94 +233,33 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description="Train SCimilarity model")
     parser.add_argument("--tiledb", type=str, help="CellArr tiledb base path")
-    parser.add_argument(
-        "--label_id_column",
-        type=str,
-        default="cellTypeOntologyID",
-        help="label id column",
-    )
-    parser.add_argument(
-        "--study_column", type=str, default="datasetID", help="study column"
-    )
-    parser.add_argument(
-        "--sample_column", type=str, default="sampleID", help="sample column"
-    )
-    parser.add_argument(
-        "--gene_order",
-        type=str,
-        default="/home/kuot/scratch/scimilarity_gene_order.tsv",
-        help="gene order tsv file",
-    )
+    parser.add_argument("--label_id_column", type=str, default="cellTypeOntologyID", help="label id column")
+    parser.add_argument("--study_column", type=str, default="datasetID", help="study column")
+    parser.add_argument("--sample_column", type=str, default="sampleID", help="sample column")
+    parser.add_argument("--gene_order", type=str, default="/home/kuot/scratch/scimilarity_gene_order.tsv", help="gene order tsv file")
     parser.add_argument("-g", type=int, default=0, help="gpu index")
     parser.add_argument("-m", type=float, default=0.05, help="triplet loss margin")
     parser.add_argument("-w", type=float, default=0.001, help="triplet loss weight")
-    parser.add_argument(
-        "-t",
-        type=str,
-        default="semihard",
-        help="negative selection type: [semihard, random, hardest]",
-    )
-    parser.add_argument(
-        "-b", type=int, default=1000, help="batch size, number of cells"
-    )
+    parser.add_argument("-t", type=str, default="semihard", help="negative selection type: [semihard, random, hardest]")
+    parser.add_argument("-b", type=int, default=1000, help="batch size, number of cells")
     parser.add_argument("-e", type=int, default=500, help="max epochs")
     parser.add_argument("-n", type=int, default=100, help="number of batches per epoch")
     parser.add_argument("-l", type=float, default=0.005, help="learning rate")
     parser.add_argument("--latent_dim", type=int, default=128, help="latent space dim")
-    parser.add_argument(
-        "--hidden_dim",
-        nargs="+",
-        type=int,
-        default=[1024, 1024, 1024],
-        help="list of hidden layers and sizes",
-    )
-    parser.add_argument(
-        "--input_dropout", type=float, default=0.4, help="input layer dropout p"
-    )
-    parser.add_argument(
-        "--dropout", type=float, default=0.5, help="hidden layer dropout p"
-    )
-    parser.add_argument(
-        "--l1", type=float, default=1e-4, help="l1 regularization lambda"
-    )
-    parser.add_argument(
-        "--l2", type=float, default=0.01, help="l2 regularization lambda"
-    )
-    parser.add_argument(
-        "--cross", type=int, default=1, help="sample across studies, 0: off, 1: on"
-    )
-    parser.add_argument(
-        "--perturb",
-        type=int,
-        default=0,
-        help="perturb labels with parent cell type (if parent exists in training data), 0: off, 1: on",
-    )
-    parser.add_argument(
-        "--perturb_fraction",
-        type=float,
-        default=0.5,
-        help="fraction of labels to attempt to perturb",
-    )
-    parser.add_argument(
-        "--suffix", type=str, default="version_0", help="model name suffix"
-    )
+    parser.add_argument("--hidden_dim", nargs="+", type=int, default=[1024, 1024, 1024], help="list of hidden layers and sizes")
+    parser.add_argument("--input_dropout", type=float, default=0.4, help="input layer dropout p")
+    parser.add_argument("--dropout", type=float, default=0.5, help="hidden layer dropout p")
+    parser.add_argument("--l1", type=float, default=1e-4, help="l1 regularization lambda")
+    parser.add_argument("--l2", type=float, default=0.01, help="l2 regularization lambda")
+    parser.add_argument("--cross", type=int, default=1, help="sample across studies, 0: off, 1: on")
+    parser.add_argument("--perturb", type=int, default=0, help="perturb labels with parent cell type (if parent exists in training data), 0: off, 1: on")
+    parser.add_argument("--perturb_fraction", type=float, default=0.5, help="fraction of labels to attempt to perturb")
+    parser.add_argument("--suffix", type=str, default="version_0", help="model name suffix")
     parser.add_argument("--model_folder", type=str, help="where to save model")
-    parser.add_argument(
-        "--result_folder", type=str, default=None, help="where to save results"
-    )
-    parser.add_argument(
-        "--log_folder",
-        type=str,
-        default="lightning_logs",
-        help="where to save lightning logs",
-    )
+    parser.add_argument("--result_folder", type=str, default=None, help="where to save results")
+    parser.add_argument("--log_folder", type=str, default="lightning_logs", help="where to save lightning logs")
     parser.add_argument("--num_workers", type=int, default=8, help="number of workers")
-    parser.add_argument(
-        "--cosine_annealing_tmax",
-        type=int,
-        default=0,
-        help="T max for cosine LR annealing, use max epochs if 0",
-    )
+    parser.add_argument("--cosine_annealing_tmax", type=int, default=0, help="T max for cosine LR annealing, use max epochs if 0")
     args = parser.parse_args()
 
     train(args)

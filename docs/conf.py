@@ -40,44 +40,42 @@ extensions = [
     "sphinx.ext.napoleon",
     "nbsphinx",
     "sphinx_gallery.load_style",
-]
+    ]
 
 # autodoc configuration
 autodoc_typehints = "description"
-autodoc_mock_imports = [
-    "anndata",
-    "hnswlib",
-    "captum",
-    "circlify",
-    "matplotlib",
-    "networkx",
-    "numba",
-    "numcodecs",
-    "numpy",
-    "obonet",
-    "pandas",
-    "pegasusio",
-    "pytorch_lightning",
-    "scanpy",
-    "scipy",
-    "seaborn",
-    "tiledb",
-    "tqdm",
-    "torch",
-    "zarr",
-]
+autodoc_mock_imports = ["anndata",
+                        "hnswlib",
+                        "captum",
+                        "circlify",
+                        "matplotlib",
+                        "networkx",
+                        "numba",
+                        "numcodecs",
+                        "numpy",
+                        "obonet",
+                        "pandas",
+                        "pegasusio",
+                        "pytorch_lightning",
+                        "scanpy",
+                        "scipy",
+                        "seaborn",
+                        "tiledb",
+                        "tqdm",
+                        "torch",
+                        "zarr"]
 
 # todo configuration
 todo_include_todos = True
 
 # nbsphinx configuration
 nbsphinx_thumbnails = {
-    "notebooks/cell_search_tutorial_1": "_static/search_thumbnail_1.png",
-    "notebooks/cell_search_tutorial_2": "_static/search_thumbnail_2.png",
-    "notebooks/cell_search_tutorial_3": "_static/search_thumbnail_3.png",
-    "notebooks/cell_annotation_tutorial": "_static/annotation_thumbnail.png",
-    "notebooks/advanced_tutorial": "_static/advanced_thumbnail.png",
-    "notebooks/training_tutorial": "_static/training_thumbnail.png",
+    'notebooks/cell_search_tutorial_1': '_static/search_thumbnail_1.png',
+    'notebooks/cell_search_tutorial_2': '_static/search_thumbnail_2.png',
+    'notebooks/cell_search_tutorial_3': '_static/search_thumbnail_3.png',
+    'notebooks/cell_annotation_tutorial': '_static/annotation_thumbnail.png',
+    'notebooks/advanced_tutorial': '_static/advanced_thumbnail.png',
+    'notebooks/training_tutorial': '_static/training_thumbnail.png'
 }
 
 # Add any paths that contain templates here, relative to this directory.
@@ -194,7 +192,7 @@ html_title = project
 html_static_path = ["_static"]
 
 # Custom CSS
-html_css_files = ["custom.css"]
+html_css_files = ['custom.css']
 
 # If not '', a 'Last updated on:' timestamp is inserted at every page bottom,
 # using the given strftime format.
@@ -255,13 +253,7 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-    (
-        "index",
-        "user_guide.tex",
-        "scimilarity Documentation",
-        "Graham Heimberg",
-        "manual",
-    )
+    ("index", "user_guide.tex", "scimilarity Documentation", "Graham Heimberg", "manual")
 ]
 
 # The name of an image file (relative to this directory) to place at the top of

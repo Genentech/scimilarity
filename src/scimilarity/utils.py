@@ -5,12 +5,11 @@ if TYPE_CHECKING:
     import numpy
     import pandas
     import scipy.sparse
+    import tiledb
     import tiledb.libtiledb
 
 
-def lognorm_counts(
-    data: "anndata.AnnData",
-) -> "anndata.AnnData":
+def lognorm_counts(data: "anndata.AnnData") -> "anndata.AnnData":
     """Log normalize the gene expression raw counts (per 10k).
 
     Parameters
@@ -32,7 +31,7 @@ def lognorm_counts(
     import scanpy as sc
 
     if "counts" not in data.layers:
-        raise ValueError("Raw counts matrix not found in layers['counts'].")
+        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
 
     data.X = data.layers["counts"].copy()
 
@@ -197,10 +196,7 @@ def filter_cells(
     return data
 
 
-def convert_id2symbol(
-    adata: "anndata.AnnData",
-    mapping_table: str,
-):
+def convert_id2symbol(adata: "anndata.AnnData", mapping_table: str):
     """Convert EnsembleIDs to gene symbols via a mapping table.
 
     Parameters
@@ -244,9 +240,7 @@ def convert_id2symbol(
     return adata
 
 
-def consolidate_duplicate_symbols(
-    adata: "anndata.AnnData",
-) -> "anndata.AnnData":
+def consolidate_duplicate_symbols(adata: "anndata.AnnData") -> "anndata.AnnData":
     """Consolidate duplicate gene symbols with sum.
 
     Parameters
@@ -287,8 +281,7 @@ def consolidate_duplicate_symbols(
             np.array(adata.layers["counts"][:, idx].sum(axis=1)).flatten()[:, None]
         )
         gene_data = anndata.AnnData(
-            X=csr_matrix(counts.shape),
-            var=pd.DataFrame(index=[k]),
+            X=csr_matrix(counts.shape), var=pd.DataFrame(index=[k])
         )
         gene_data.layers["counts"] = counts
         dup_genes_data.append(gene_data)
@@ -492,8 +485,8 @@ def write_csr_to_tiledb(
     ----------
     tdb: tiledb.libtiledb.SparseArrayImpl
         TileDB array.
-    arr: numpy.ndarray
-        Dense numpy array.
+    matrix : scipy.sparse.csr_matrix
+        Sparse matrix in csr format.
     value_type: type
         The type of the value, typically np.float32.
     row_start: int, default: 0
@@ -928,9 +921,7 @@ def subset_by_unique_values(
 
 
 def subset_by_frequency(
-    df: "pandas.DataFrame",
-    group_columns: Union[List[str], str],
-    n: int,
+    df: "pandas.DataFrame", group_columns: Union[List[str], str], n: int
 ) -> "pandas.DataFrame":
     """Subset the DataFrame to only columns where the group appears at least n times.
 

@@ -1,67 +1,32 @@
 import anndata
 import argparse
 import hnswlib
-import os
+import os, sys
 import numpy as np
+import pandas as pd
+import tiledb
 from tqdm import tqdm
 
 from scimilarity import CellEmbedding
 from scimilarity.utils import align_dataset, lognorm_counts
 
 import warnings
-
 warnings.filterwarnings("ignore")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Build annotation knn from anndata")
-    parser.add_argument(
-        "-d", type=str, help="Anndata from which to build annotation knn"
-    )
+    parser.add_argument("-d", type=str, help="Anndata from which to build annotation knn")
     parser.add_argument("-m", type=str, help="model path")
     parser.add_argument("-b", type=int, default=100000, help="cell buffer size")
-    parser.add_argument(
-        "--annotation",
-        type=str,
-        default="annotation",
-        help="relative path to the annotation folder",
-    )
-    parser.add_argument(
-        "--label_column_name",
-        type=str,
-        default="cellTypeName",
-        help="label column name in metadata",
-    )
-    parser.add_argument(
-        "--study_column_name",
-        type=str,
-        default="study",
-        help="study column name in metadata",
-    )
-    parser.add_argument(
-        "--knn", type=str, default="labelled_kNN.bin", help="knn filename"
-    )
-    parser.add_argument(
-        "--labels", type=str, default="reference_labels.tsv", help="labels filename"
-    )
-    parser.add_argument(
-        "--safelist_file",
-        type=str,
-        default=None,
-        help="optional cell type safelist filename",
-    )
-    parser.add_argument(
-        "--ef_construction",
-        type=int,
-        default=1000,
-        help="hnswlib ef construction parameter",
-    )
-    parser.add_argument(
-        "--M_construction",
-        type=int,
-        default=80,
-        help="hnswlib M construction parameter",
-    )
+    parser.add_argument("--annotation", type=str, default="annotation", help="relative path to the annotation folder")
+    parser.add_argument("--label_column_name", type=str, default="cellTypeName", help="label column name in metadata")
+    parser.add_argument("--study_column_name", type=str, default="study", help="study column name in metadata")
+    parser.add_argument("--knn", type=str, default="labelled_kNN.bin", help="knn filename")
+    parser.add_argument("--labels", type=str, default="reference_labels.tsv", help="labels filename")
+    parser.add_argument("--safelist_file", type=str, default=None, help="optional cell type safelist filename")
+    parser.add_argument("--ef_construction", type=int, default=1000, help="hnswlib ef construction parameter")
+    parser.add_argument("--M_construction", type=int, default=80, help="hnswlib M construction parameter")
     args = parser.parse_args()
     print(args)
 
@@ -76,7 +41,7 @@ def main():
 
     # model
     ce = CellEmbedding(model_path)
-
+ 
     # data
     adata = anndata.read_h5ad(args.d)
     adata = align_dataset(adata, ce.gene_order)
@@ -86,9 +51,7 @@ def main():
     if args.safelist_file is not None:
         with open(args.safelist_file, "r") as fh:
             safelist = [line.strip() for line in fh]
-        reference_df = reference_df[
-            reference_df[label_column_name].isin(safelist)
-        ].copy()
+        reference_df = reference_df[reference_df[label_column_name].isin(safelist)].copy()
         assert reference_df.shape[0] > 0, "No valid safelist entries in data"
 
     embeddings = []
@@ -103,7 +66,7 @@ def main():
         embeddings.append(embedding)
         labels.extend(df[label_column_name].tolist())
         studies.extend(df[study_column_name].tolist())
-    embeddings = np.vstack(embeddings)
+    embeddings = np.vstack(embeddings) 
     print("embeddings", embeddings.shape)
 
     annotation_path = os.path.join(model_path, args.annotation)

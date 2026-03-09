@@ -10,17 +10,17 @@ from typing import Optional
 from .zarr_dataset import ZarrDataset
 
 
-class scDataset(Dataset):
+class scDataset(Dataset[tuple[np.ndarray, str, str]]):
     """A class that represent a collection of single cell datasets in zarr format.
 
     Parameters
     ----------
     data_list: list[ZarrDataset]
         List of single-cell datasets.
-    obs_celltype: str, default: "celltype_name"
-        Cell type name.
-    obs_study: str, default: "study"
-        Study name.
+    obs_celltype: str
+        Cell type name, default: "celltype_name".
+    obs_study: str
+        Study name, default: "study".
     """
 
     def __init__(
@@ -42,10 +42,10 @@ class scDataset(Dataset):
             i for n in range(len(self.ncells_list)) for i in range(self.ncells_list[n])
         ]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.ncells
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, str, str]:
         # data, label, study
         data_idx = self.data_idx[idx]
         cell_idx = self.cell_idx[idx]
