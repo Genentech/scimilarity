@@ -1,5 +1,10 @@
 from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union, TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy
+    import pandas
+    import zarr
 
 
 ARRAY_FORMATS = {
@@ -62,7 +67,7 @@ class ZarrDataset:
         return d
 
     @property
-    def shape(self) -> Tuple[int, int]:
+    def shape(self) -> Tuple[int, int] | None:
         """Get the shape of the gene expression matrix.
 
         Returns
@@ -80,7 +85,7 @@ class ZarrDataset:
         return None
 
     @property
-    def var_index(self) -> "pandas.Index":
+    def var_index(self) -> "pandas.Index | None":
         """Get the var index.
 
         Returns
@@ -98,7 +103,7 @@ class ZarrDataset:
         return None
 
     @property
-    def var(self) -> "pandas.DataFrame":
+    def var(self) -> "pandas.DataFrame | None":
         """Get the var dataframe.
 
         Returns
@@ -122,7 +127,7 @@ class ZarrDataset:
         return None
 
     @property
-    def obs_index(self) -> "pandas.Index":
+    def obs_index(self) -> "pandas.Index | None":
         """Get the obs index.
 
         Returns
@@ -140,7 +145,7 @@ class ZarrDataset:
         return None
 
     @property
-    def obs(self) -> "pandas.DataFrame":
+    def obs(self) -> "pandas.DataFrame | None":
         """Get the obs dataframe.
 
         Returns
@@ -163,7 +168,9 @@ class ZarrDataset:
             return obs
         return None
 
-    def get_X(self, in_mem: bool = False):
+    def get_X(
+        self, in_mem: bool = False
+    ) -> Union[csr_matrix, csc_matrix, coo_matrix, None]:
         """Get the X matrix backed by zarr storage.
 
         Parameters
@@ -186,7 +193,9 @@ class ZarrDataset:
             return self.get_matrix(X, in_mem=in_mem)
         return None
 
-    def get_counts(self, in_mem: bool = False):
+    def get_counts(
+        self, in_mem: bool = False
+    ) -> Union[csr_matrix, csc_matrix, coo_matrix, None]:
         """Get the count matrix backed by zarr storage.
 
         Parameters
@@ -211,7 +220,7 @@ class ZarrDataset:
                 return self.get_matrix(counts, in_mem=in_mem)
         return None
 
-    def set_X(self, matrix: Union[csr_matrix, csc_matrix, coo_matrix]):
+    def set_X(self, matrix: Union[csr_matrix, csc_matrix, coo_matrix]) -> None:
         """Set the X sparse matrix.
            This will overwrite the current stored X.
 
@@ -230,7 +239,7 @@ class ZarrDataset:
 
     def append_X(
         self, matrix: Union[csr_matrix, csc_matrix], axis: Optional[int] = None
-    ):
+    ) -> None:
         """Append to the X sparse matrix.
            Only row-wise concatentation for csr_matrix.
            Only col-wise concatentation for csc_matrix.
@@ -250,7 +259,9 @@ class ZarrDataset:
         if "X" in self.root:
             self.append_matrix(self.root["X"], matrix, axis)
 
-    def get_var(self, column: str) -> Union["numpy.ndarray", "pandas.Categorical"]:
+    def get_var(
+        self, column: str
+    ) -> Union["numpy.ndarray", "pandas.Categorical", None]:
         """Get data.var[column] data.
 
         Parameters
@@ -260,7 +271,7 @@ class ZarrDataset:
 
         Returns
         -------
-        pandas.Series
+        numpy.ndarray | pandas.Categorical | None
             A pandas series containing the var data.
 
         Examples
@@ -272,7 +283,9 @@ class ZarrDataset:
             return self.get_annotation_column(self.root["var"], column)
         return None
 
-    def get_obs(self, column: str) -> Union["numpy.ndarray", "pandas.Categorical"]:
+    def get_obs(
+        self, column: str
+    ) -> Union["numpy.ndarray", "pandas.Categorical", None]:
         """Get data.obs[column] data.
 
         Parameters
@@ -282,7 +295,7 @@ class ZarrDataset:
 
         Returns
         -------
-        pandas.Series
+        numpy.ndarray | pandas.Categorical | None
             A pandas series containing the obs data.
 
         Examples
@@ -294,7 +307,7 @@ class ZarrDataset:
             return self.get_annotation_column(self.root["obs"], column)
         return None
 
-    def get_uns(self, key: str):
+    def get_uns(self, key: str) -> Any:
         """Get data.uns[key] data.
 
         Parameters
@@ -318,13 +331,15 @@ class ZarrDataset:
                 return group[key][...]
         return None
 
-    def get_row(self, group, idx: int) -> Union[csr_matrix, coo_matrix]:
+    def get_row(
+        self, group: "zarr.Group", idx: int
+    ) -> Union[csr_matrix, coo_matrix | None]:
         """Get sparse row data as sparse matrix.
 
         Parameters
         ----------
-        group:
-            A zarr group
+        group: "zarr.Group",
+            A zarr group.
         idx: int,
             Numerical index of the cell.
 
@@ -348,7 +363,9 @@ class ZarrDataset:
             f"Unsupported encoding-type for row slicing: {encoding_type}."
         )
 
-    def get_col(self, group, idx: int) -> Union[csc_matrix, coo_matrix]:
+    def get_col(
+        self, group: "zarr.Group", idx: int
+    ) -> Union[csc_matrix, coo_matrix | None]:
         """Get sparse column data as sparse matrix.
 
         Parameters
@@ -378,7 +395,7 @@ class ZarrDataset:
             f"Unsupported encoding-type for col slicing: {encoding_type}."
         )
 
-    def get_cell(self, idx: int) -> Union[csr_matrix, coo_matrix]:
+    def get_cell(self, idx: int) -> Union[csr_matrix, coo_matrix, None]:
         """Get gene expression data for one cell row as sparse matrix.
 
         Parameters
@@ -400,7 +417,9 @@ class ZarrDataset:
             return self.get_row(self.root["X"], idx)
         return None
 
-    def get_layer_cell(self, layer_key: str, idx: int) -> Union[csr_matrix, coo_matrix]:
+    def get_layer_cell(
+        self, layer_key: str, idx: int
+    ) -> Union[csr_matrix, coo_matrix, None]:
         """Get data for one cell row from a layer as sparse matrix.
 
         Parameters
@@ -423,7 +442,7 @@ class ZarrDataset:
                 return self.get_row(self.root["layers"][layer_key], idx)
         return None
 
-    def get_gene(self, idx: int) -> Union[csc_matrix, coo_matrix]:
+    def get_gene(self, idx: int) -> Union[csc_matrix, coo_matrix, None]:
         """Get gene expression data for one gene column as sparse matrix.
 
         Parameters
@@ -445,7 +464,9 @@ class ZarrDataset:
             return self.get_col(self.root["X"], idx)
         return None
 
-    def get_layer_gene(self, layer_key: str, idx: int) -> Union[csc_matrix, coo_matrix]:
+    def get_layer_gene(
+        self, layer_key: str, idx: int
+    ) -> Union[csc_matrix, coo_matrix, None]:
         """Get data for one gene column from a layer as sparse matrix.
 
         Parameters
@@ -471,7 +492,7 @@ class ZarrDataset:
         return None
 
     def slice_with(
-        self, group, idx: int
+        self, group: "zarr.Group", idx: int
     ) -> Tuple["numpy.ndarray", "numpy.ndarray", "numpy.ndarray"]:
         """Slice a sparse matrix, with its directional specification.
         i.e. row-wise for csr, column-wise for csc.
@@ -508,7 +529,7 @@ class ZarrDataset:
         return (new_data, new_indices, new_indptr)
 
     def slice_across(
-        self, group, idx: int
+        self, group: "zarr.Group", idx: int
     ) -> Tuple["numpy.ndarray", "numpy.ndarray", "numpy.ndarray"]:
         """Slice a sparse matrix, across its directional specification.
         i.e. column-wise for csr, row-wise for csc.
@@ -552,7 +573,7 @@ class ZarrDataset:
             new_indptr.append(pos)
         return (new_data, new_indices, new_indptr)
 
-    def row_slice_csr(self, group, idx: int) -> csr_matrix:
+    def row_slice_csr(self, group: "zarr.Group", idx: int) -> csr_matrix:
         """Row slice a sparse csr matrix.
 
         Parameters
@@ -576,7 +597,7 @@ class ZarrDataset:
         shape = group.attrs["shape"]
         return csr_matrix((new_data, new_indices, new_indptr), shape=(1, shape[1]))
 
-    def col_slice_csc(self, group, idx: int) -> csc_matrix:
+    def col_slice_csc(self, group: "zarr.Group", idx: int) -> csc_matrix:
         """Column slice a sparse csc matrix.
 
         Parameters
@@ -600,7 +621,7 @@ class ZarrDataset:
         shape = group.attrs["shape"]
         return csc_matrix((new_data, new_indices, new_indptr), shape=(shape[0], 1))
 
-    def slice_coo(self, group, idx: int, axis: int) -> coo_matrix:
+    def slice_coo(self, group: "zarr.Group", idx: int, axis: int) -> coo_matrix | None:
         """Slice a sparse coo matrix.
 
         Parameters
@@ -643,7 +664,7 @@ class ZarrDataset:
         return None
 
     def get_matrix(
-        self, group, in_mem: bool = False
+        self, group: "zarr.Group", in_mem: bool = False
     ) -> Union[csr_matrix, csc_matrix, coo_matrix]:
         """Get the sparse matrix from zarr group.
 
@@ -688,7 +709,9 @@ class ZarrDataset:
             raise RuntimeError(f"Unsupported encoding-type: {encoding_type}.")
         return mtx
 
-    def set_matrix(self, group, matrix: Union[csr_matrix, csc_matrix, coo_matrix]):
+    def set_matrix(
+        self, group: "zarr.Group", matrix: Union[csr_matrix, csc_matrix, coo_matrix]
+    ):
         """Set the sparse matrix for a zarr group.
            This will overwrite the current data.
 
@@ -723,7 +746,10 @@ class ZarrDataset:
             group.create_dataset("col", data=matrix.col, dtype=matrix.col.dtype)
 
     def append_matrix(
-        self, group, matrix: Union[csr_matrix, csc_matrix], axis: Optional[int] = None
+        self,
+        group: "zarr.Group",
+        matrix: Union[csr_matrix, csc_matrix],
+        axis: Optional[int] = None,
     ):
         """Append a sparse matrix for a zarr group.
 
@@ -747,14 +773,14 @@ class ZarrDataset:
         shape = group.attrs["shape"]
 
         if encoding_type == "csr_matrix":
-            assert (
-                shape[1] == matrix.shape[1]
-            ), "csr_matrix must have same size of dimension 1 to be appended."
+            assert shape[1] == matrix.shape[1], (
+                "csr_matrix must have same size of dimension 1 to be appended."
+            )
             new_shape = (shape[0] + matrix.shape[0], shape[1])
         elif encoding_type == "csc_matrix":
-            assert (
-                shape[0] == matrix.shape[0]
-            ), "csc_matrix must have same size of dimension 0 to be appended."
+            assert shape[0] == matrix.shape[0], (
+                "csc_matrix must have same size of dimension 0 to be appended."
+            )
             new_shape = (shape[0], shape[1] + matrix.shape[1])
         elif encoding_type == "coo_matrix":
             assert axis is not None and axis in [
@@ -762,14 +788,14 @@ class ZarrDataset:
                 1,
             ], "axis must be 0 or 1 for coo_matrix."
             if axis == 0:
-                assert (
-                    shape[1] == matrix.shape[1]
-                ), "coo_matrix must have same size of dimension 1 to be appended."
+                assert shape[1] == matrix.shape[1], (
+                    "coo_matrix must have same size of dimension 1 to be appended."
+                )
                 new_shape = (shape[0] + matrix.shape[0], shape[1])
             elif axis == 1:
-                assert (
-                    shape[0] == matrix.shape[0]
-                ), "coo_matrix must have same size of dimension 0 to be appended."
+                assert shape[0] == matrix.shape[0], (
+                    "coo_matrix must have same size of dimension 0 to be appended."
+                )
                 new_shape = (shape[0], shape[1] + matrix.shape[1])
 
         if encoding_type in ["csr_matrix", "csc_matrix"]:
@@ -827,7 +853,7 @@ class ZarrDataset:
                 col[orig_data_size:] = matrix.col + append_offset
             group.attrs["shape"] = new_shape
 
-    def get_annotation_index(self, group) -> "pandas.Index":
+    def get_annotation_index(self, group: "zarr.Group") -> "pandas.Index":
         """Get the annotation index for a zarr group.
 
         Parameters
@@ -854,7 +880,7 @@ class ZarrDataset:
         return pd.Index(idx)
 
     def get_annotation_column(
-        self, group, column: str
+        self, group: "zarr.Group", column: str
     ) -> Union["numpy.ndarray", "pandas.Categorical"]:
         """Get an annotation column for a zarr group.
 
@@ -881,7 +907,7 @@ class ZarrDataset:
 
         if column in group:
             series = group[column]
-            if isinstance(series, zarr.hierarchy.Group) and "categories" in series:
+            if isinstance(series, zarr.Group) and "categories" in series:
                 categories = series["categories"][...]
                 if pd.api.types.is_object_dtype(categories):
                     categories = categories.astype(str)
@@ -890,8 +916,7 @@ class ZarrDataset:
                     series["codes"][...], categories, ordered=ordered
                 )
             elif (
-                isinstance(series, zarr.hierarchy.Group)
-                and "categories" in series.attrs
+                isinstance(series, zarr.Group) and "categories" in series.attrs
             ):  # for older (<0.8.0) anndata saved zarrs
                 categories = series.attrs["categories"]
                 categories_dset = group[categories]

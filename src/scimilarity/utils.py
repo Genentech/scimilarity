@@ -1,9 +1,15 @@
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple, List, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import anndata
+    import numpy
+    import pandas
+    import scipy.sparse
+    import tiledb
+    import tiledb.libtiledb
 
 
-def lognorm_counts(
-    data: "anndata.AnnData",
-) -> "anndata.AnnData":
+def lognorm_counts(data: "anndata.AnnData") -> "anndata.AnnData":
     """Log normalize the gene expression raw counts (per 10k).
 
     Parameters
@@ -99,7 +105,7 @@ def align_dataset(
 
     # check for negatives in expression data
     if np.min(data.X) < 0:
-        raise RuntimeError(f"Dataset contains negative values in expression matrix X.")
+        raise RuntimeError("Dataset contains negative values in expression matrix X.")
 
     # check if counts is dense, convert to csr_matrix if so
     if "counts" in data.layers and isinstance(data.layers["counts"], np.ndarray):
@@ -107,7 +113,7 @@ def align_dataset(
 
     # check for negatives in count data
     if "counts" in data.layers and np.min(data.layers["counts"]) < 0:
-        raise RuntimeError(f"Dataset contains negative values in layers['counts'].")
+        raise RuntimeError("Dataset contains negative values in layers['counts'].")
 
     # return data if already aligned
     if data.var.index.values.tolist() == target_gene_order:
@@ -126,7 +132,7 @@ def align_dataset(
         delattr(shell, "obsm")
 
     if data.var.shape[0] == 0:
-        raise RuntimeError(f"Empty gene space detected.")
+        raise RuntimeError("Empty gene space detected.")
 
     return shell
 
@@ -165,7 +171,7 @@ def filter_cells(
     import scanpy as sc
 
     if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+        raise ValueError("Raw counts matrix not found in layers['counts'].")
 
     # determine between "MT-" and "mt-"
     if not mito_prefix:
@@ -190,10 +196,7 @@ def filter_cells(
     return data
 
 
-def convert_id2symbol(
-    adata: "anndata.AnnData",
-    mapping_table: str,
-):
+def convert_id2symbol(adata: "anndata.AnnData", mapping_table: str):
     """Convert EnsembleIDs to gene symbols via a mapping table.
 
     Parameters
@@ -237,9 +240,7 @@ def convert_id2symbol(
     return adata
 
 
-def consolidate_duplicate_symbols(
-    adata: "anndata.AnnData",
-) -> "anndata.AnnData":
+def consolidate_duplicate_symbols(adata: "anndata.AnnData") -> "anndata.AnnData":
     """Consolidate duplicate gene symbols with sum.
 
     Parameters
@@ -264,7 +265,7 @@ def consolidate_duplicate_symbols(
     from scipy.sparse import csr_matrix
 
     if "counts" not in adata.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+        raise ValueError("Raw counts matrix not found in layers['counts'].")
     if adata.X is None:
         adata.X = csr_matrix(adata.layers["counts"].shape)
 
@@ -280,8 +281,7 @@ def consolidate_duplicate_symbols(
             np.array(adata.layers["counts"][:, idx].sum(axis=1)).flatten()[:, None]
         )
         gene_data = anndata.AnnData(
-            X=csr_matrix(counts.shape),
-            var=pd.DataFrame(index=[k]),
+            X=csr_matrix(counts.shape), var=pd.DataFrame(index=[k])
         )
         gene_data.layers["counts"] = counts
         dup_genes_data.append(gene_data)
@@ -410,7 +410,7 @@ def get_cluster_centroids(
     import numpy as np
 
     if "counts" not in data.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+        raise ValueError("Raw counts matrix not found in layers['counts'].")
 
     centroids = []
     cluster_idx = []
@@ -437,7 +437,7 @@ def get_cluster_centroids(
     centroids = np.vstack(centroids)
 
     if np.isnan(centroids).any():
-        raise RuntimeError(f"NaN detected in centroids.")
+        raise RuntimeError("NaN detected in centroids.")
 
     return centroids, cluster_idx
 
@@ -469,7 +469,7 @@ def write_array_to_tiledb(
         j = min(i + batch_size, arr.shape[0])
         arr_slice = slice(i, j)
         tdb_slice = slice(i + row_start, j + row_start)
-        tdbfile[tdb_slice, 0 : arr.shape[1]] = arr[arr_slice, :].astype(value_type)
+        tdb[tdb_slice, 0 : arr.shape[1]] = arr[arr_slice, :].astype(value_type)
 
 
 def write_csr_to_tiledb(
@@ -485,8 +485,8 @@ def write_csr_to_tiledb(
     ----------
     tdb: tiledb.libtiledb.SparseArrayImpl
         TileDB array.
-    arr: numpy.ndarray
-        Dense numpy array.
+    matrix : scipy.sparse.csr_matrix
+        Sparse matrix in csr format.
     value_type: type
         The type of the value, typically np.float32.
     row_start: int, default: 0
@@ -667,8 +667,8 @@ def adata_from_tiledb(
         for x in gene_order:
             try:
                 gene_indices.append(genes.index(x))
-            except:
-                log.info(f"Gene not found: {x}")
+            except Exception:
+                print(f"Gene not found: {x}")
                 pass
     else:
         gene_order = genes
@@ -824,14 +824,12 @@ def pseudobulk_anndata(
     >>> pseudobulk = pseudobulk_anndata(adata, groupby_labels, qc_filters=qc_filters, only_orig_genes=True)
     """
 
-    import anndata
-    from collections import Counter
     import numpy as np
     import pandas as pd
     import scanpy as sc
 
     if "counts" not in adata.layers:
-        raise ValueError(f"Raw counts matrix not found in layers['counts'].")
+        raise ValueError("Raw counts matrix not found in layers['counts'].")
 
     if qc_filters is not None:
         # determine prefix for mitochondrial genes
@@ -923,10 +921,8 @@ def subset_by_unique_values(
 
 
 def subset_by_frequency(
-    df: "pd.DataFrame",
-    group_columns: Union[List[str], str],
-    n: int,
-) -> "pd.DataFrame":
+    df: "pandas.DataFrame", group_columns: Union[List[str], str], n: int
+) -> "pandas.DataFrame":
     """Subset the DataFrame to only columns where the group appears at least n times.
 
     Parameters

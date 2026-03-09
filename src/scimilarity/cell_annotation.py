@@ -1,6 +1,12 @@
-from typing import Optional, Union, List, Set, Tuple
+from typing import Optional, Union, List, Set, Tuple, TYPE_CHECKING
+
 
 from .cell_search_knn import CellSearchKNN
+
+if TYPE_CHECKING:
+    import anndata
+    import numpy
+    import pandas
 
 
 class CellAnnotation(CellSearchKNN):
@@ -21,10 +27,7 @@ class CellAnnotation(CellSearchKNN):
     """
 
     def __init__(
-        self,
-        model_path: str,
-        use_gpu: bool = False,
-        filenames: Optional[dict] = None,
+        self, model_path: str, use_gpu: bool = False, filenames: Optional[dict] = None
     ):
         import os
 

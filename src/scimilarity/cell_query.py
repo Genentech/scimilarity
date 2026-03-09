@@ -1,6 +1,11 @@
-from typing import Dict, List, Optional, Tuple, Union, Set
+from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 from .cell_search_knn import CellSearchKNN
+
+if TYPE_CHECKING:
+    import anndata
+    import numpy
+    import pandas
 
 
 class CellQuery(CellSearchKNN):
@@ -39,8 +44,6 @@ class CellQuery(CellSearchKNN):
         load_knn: bool = True,
     ):
         import os
-        import numpy as np
-        import pandas as pd
         import tiledb
 
         super().__init__(
@@ -340,7 +343,7 @@ class CellQuery(CellSearchKNN):
 
         import numpy as np
         from scipy.cluster.vq import kmeans
-        from .utils import get_centroid, get_dist2centroid
+        from .utils import get_centroid
 
         cells = adata[adata.obs[centroid_key] == 1].copy()
         centroid = get_centroid(cells.layers["counts"])
@@ -623,7 +626,7 @@ class CellQuery(CellSearchKNN):
 
         import numpy as np
         from scipy.cluster.vq import kmeans
-        from .utils import get_centroid, get_dist2centroid
+        from .utils import get_centroid
 
         cells = adata[adata.obs[centroid_key] == 1].copy()
         centroid = get_centroid(cells.layers["counts"])

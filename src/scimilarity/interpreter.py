@@ -1,5 +1,11 @@
 from torch import nn
-from typing import Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
+    import numpy
+    import pandas
+    import scipy.sparse
 
 
 class SimpleDist(nn.Module):
@@ -15,11 +21,7 @@ class SimpleDist(nn.Module):
         super().__init__()
         self.encoder = encoder
 
-    def forward(
-        self,
-        anchors: "torch.Tensor",
-        negatives: "torch.Tensor",
-    ):
+    def forward(self, anchors: "torch.Tensor", negatives: "torch.Tensor"):
         """Forward.
 
         Parameters
@@ -55,11 +57,7 @@ class Interpreter:
     >>> interpreter = Interpreter(CellEmbedding("/opt/data/model").model)
     """
 
-    def __init__(
-        self,
-        encoder: "torch.nn.Module",
-        gene_order: list,
-    ):
+    def __init__(self, encoder: "torch.nn.Module", gene_order: list):
         from captum.attr import IntegratedGradients
 
         self.encoder = encoder

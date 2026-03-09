@@ -4,7 +4,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from .utils import align_dataset
 from .ontologies import (
@@ -13,8 +13,21 @@ from .ontologies import (
     find_most_viable_parent,
 )
 
+if TYPE_CHECKING:
+    import numpy
+    from numpy.typing import NDArray
+    from typing import Any
 
-class scDataset(Dataset):
+    Index = (
+        NDArray[numpy.integer[Any]]
+        | NDArray[numpy.bool_]
+        | tuple[NDArray[numpy.integer[Any]] | NDArray[numpy.bool_], ...]
+    )
+
+
+class scDataset(
+    Dataset[tuple["numpy.ndarray", "numpy.ndarray", Optional["numpy.ndarray"]]]
+):
     """A class that represents a single cell dataset.
 
     Parameters
@@ -27,17 +40,28 @@ class scDataset(Dataset):
         The study identifier for every cell.
     """
 
-    def __init__(self, X, Y, study=None):
+    def __init__(
+        self,
+        X: "numpy.ndarray",
+        Y: "numpy.ndarray",
+        study: Optional["numpy.ndarray"] = None,
+    ):
         self.X = X
         self.Y = Y
         self.study = study
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.Y)
 
-    def __getitem__(self, idx):
+    def __getitem__(
+        self, idx: "Index"
+    ) -> tuple["numpy.ndarray", "numpy.ndarray", Optional["numpy.ndarray"]]:
         # data, label, study
-        return self.X[idx].toarray().flatten(), self.Y[idx], self.study[idx]
+        return (
+            self.X[idx].toarray().flatten(),
+            self.Y[idx],
+            self.study[idx] if self.study is not None else None,
+        )
 
 
 class scCollator:
@@ -51,11 +75,7 @@ class scCollator:
         Use sparse matrices.
     """
 
-    def __init__(
-        self,
-        label2int: dict,
-        sparse: bool = False,
-    ):
+    def __init__(self, label2int: dict, sparse: bool = False):
         self.label2int = label2int
         self.sparse = sparse
 
@@ -65,11 +85,8 @@ class scCollator:
         X = torch.squeeze(torch.Tensor(np.vstack(profiles)))
         if self.sparse:
             X = X.to_sparse()
-        return (
-            X,
-            torch.Tensor([self.label2int[l] for l in labels]),
-            np.array(studies),
-        )
+
+        return (X, torch.Tensor([self.label2int[l] for l in labels]), np.array(studies))
 
 
 class MetricLearningDataModule(pl.LightningDataModule):
