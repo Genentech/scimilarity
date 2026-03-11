@@ -8,10 +8,10 @@
 *.orig
 *.log
 *.pot
-__pycache__/*
+__pycache__/
 .cache/*
 .*.swp
-*/.ipynb_checkpoints/*
+.ipynb_checkpoints/
 .DS_Store
 
 # Project files

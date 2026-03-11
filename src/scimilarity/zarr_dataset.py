@@ -1,11 +1,10 @@
+from packaging.version import Version
 from scipy.sparse import csr_matrix, csc_matrix, coo_matrix
-from typing import Dict, Optional, Tuple, Union, TYPE_CHECKING, Any
+from typing import Any, Dict, Optional, Tuple, Union
 
-if TYPE_CHECKING:
-    import numpy
-    import pandas
-    import zarr
+import zarr
 
+ZARR_V3 = Version(zarr.__version__) >= Version("3.0.0")
 
 ARRAY_FORMATS = {
     "csr_matrix": csr_matrix,
@@ -31,12 +30,14 @@ class ZarrDataset:
     """
 
     def __init__(self, store_path: str, mode: str = "r"):
-        import zarr
-
-        self.store_path = zarr.DirectoryStore(store_path)
-        self.root = zarr.open_group(
-            self.store_path, mode=mode, chunk_store=self.store_path
-        )
+        if ZARR_V3:
+            self.store_path = store_path
+            self.root = zarr.open_group(store_path, mode=mode)
+        else:
+            self.store_path = zarr.DirectoryStore(store_path)
+            self.root = zarr.open_group(
+                self.store_path, mode=mode, chunk_store=self.store_path
+            )
 
     @property
     def dataset_info(self) -> Dict[str, list]:
@@ -732,18 +733,18 @@ class ZarrDataset:
         group.attrs.setdefault("encoding-version", "0.1.0")
         group.attrs.setdefault("shape", list(matrix.shape))
 
+        if ZARR_V3:
+            create = lambda name, data, **_: group.create_array(name, data=data)
+        else:
+            create = lambda name, data, **kw: group.create_dataset(name, data=data, **kw)
         if encoding_type in ["csr_matrix", "csc_matrix"]:
-            group.create_dataset("data", data=matrix.data, dtype=matrix.data.dtype)
-            group.create_dataset(
-                "indptr", data=matrix.indptr, dtype=matrix.indptr.dtype
-            )
-            group.create_dataset(
-                "indices", data=matrix.indices, dtype=matrix.indices.dtype
-            )
+            create("data", data=matrix.data, dtype=matrix.data.dtype)
+            create("indptr", data=matrix.indptr, dtype=matrix.indptr.dtype)
+            create("indices", data=matrix.indices, dtype=matrix.indices.dtype)
         elif encoding_type in ["coo_matrix"]:
-            group.create_dataset("data", data=matrix.data, dtype=matrix.data.dtype)
-            group.create_dataset("row", data=matrix.row, dtype=matrix.row.dtype)
-            group.create_dataset("col", data=matrix.col, dtype=matrix.col.dtype)
+            create("data", data=matrix.data, dtype=matrix.data.dtype)
+            create("row", data=matrix.row, dtype=matrix.row.dtype)
+            create("col", data=matrix.col, dtype=matrix.col.dtype)
 
     def append_matrix(
         self,
@@ -903,7 +904,6 @@ class ZarrDataset:
         """
 
         import pandas as pd
-        import zarr
 
         if column in group:
             series = group[column]
@@ -955,12 +955,18 @@ class ZarrDataset:
         anno.attrs.setdefault("encoding-type", "dataframe")
         anno.attrs.setdefault("encoding-version", "0.2.0")
 
-        anno.create_dataset(
-            "_index",
-            data=df.index._values,
-            dtype=df.index._values.dtype,
-            object_codec=numcodecs.JSON(),
-        )
+        def create_array(group, name, data, is_string=False):
+            if ZARR_V3:
+                if is_string:
+                    data = data.astype(str) if data.dtype == object else data
+                group.create_array(name, data=data)
+            else:
+                kwargs = {"data": data, "dtype": data.dtype}
+                if is_string:
+                    kwargs["object_codec"] = numcodecs.JSON()
+                group.create_dataset(name, **kwargs)
+
+        create_array(anno, "_index", df.index._values, is_string=True)
         anno["_index"].attrs.setdefault("encoding-type", "string-array")
         anno["_index"].attrs.setdefault("encoding-version", "0.2.0")
         for k in df.columns:
@@ -971,30 +977,17 @@ class ZarrDataset:
                 anno[k].attrs.setdefault("encoding-version", "0.2.0")
                 anno[k].attrs.setdefault("ordered", False)
 
-                anno[k].create_dataset(
-                    "categories",
-                    data=v.categories._values,
-                    dtype=v.categories._values.dtype,
-                    object_codec=numcodecs.JSON(),
+                create_array(
+                    anno[k], "categories", v.categories._values, is_string=True
                 )
                 anno[k]["categories"].attrs.setdefault("encoding-type", "string-array")
                 anno[k]["categories"].attrs.setdefault("encoding-version", "0.2.0")
 
-                anno[k].create_dataset("codes", data=v.codes)
+                create_array(anno[k], "codes", v.codes)
                 anno[k]["codes"].attrs.setdefault("encoding-type", "array")
                 anno[k]["codes"].attrs.setdefault("encoding-version", "0.2.0")
             elif isinstance(df[k], pd.Series):
-                if df[k].dtype == "O":
-                    anno.create_dataset(
-                        k,
-                        data=df[k]._values,
-                        dtype=df[k]._values.dtype,
-                        object_codec=numcodecs.JSON(),
-                    )
-                else:
-                    anno.create_dataset(
-                        k, data=df[k]._values, dtype=df[k]._values.dtype
-                    )
+                create_array(anno, k, df[k]._values, is_string=(df[k].dtype == "O"))
                 anno[k].attrs.setdefault("encoding-type", "array")
                 anno[k].attrs.setdefault("encoding-version", "0.2.0")
 
