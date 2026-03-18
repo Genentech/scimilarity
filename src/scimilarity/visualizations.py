@@ -299,7 +299,7 @@ def draw_circles(
 
     fig, ax = plt.subplots(figsize=figsize)
     if use_colormap:
-        cmap = mpl.cm.get_cmap(use_colormap)
+        cmap = mpl.colormaps[use_colormap]
 
     ax.set_title(title)  # title
     ax.axis("off")  # remove axes
