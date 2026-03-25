@@ -431,9 +431,8 @@ class CellMultisetDataModule(pl.LightningDataModule):
             for x in self.gene_order:
                 try:
                     self.gene_indices.append(genes.index(x))
-                except:
+                except ValueError:
                     log.info(f"Gene not found: {x}")
-                    pass
         else:
             self.gene_order = genes
             self.gene_indices = list(range(len(genes)))
