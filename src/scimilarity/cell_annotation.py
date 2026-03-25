@@ -89,7 +89,7 @@ class CellAnnotation(CellSearchKNN):
         for i in self.idx2label:
             try:  # throws an expection if not already marked
                 self.knn.unmark_deleted(i)
-            except:
+            except RuntimeError:
                 pass
 
     def blocklist_celltypes(self, labels: Union[List[str], Set[str]]):
@@ -142,7 +142,7 @@ class CellAnnotation(CellSearchKNN):
         for i in self.idx2label:  # mark all
             try:  # throws an exception if already marked
                 self.knn.mark_deleted(i)
-            except:
+            except RuntimeError:
                 pass
         for i, celltype_name in self.idx2label.items():
             if celltype_name in self.safelist:
