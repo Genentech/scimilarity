@@ -165,10 +165,9 @@ class scCollator:
 
         self.counts_tdb = tiledb.open(self.counts_uri, "r", config=scCollator.cfg)
         self.counts_attr = self.counts_tdb.schema.attr(0).name
-        self.matrix_shape = (
-            self.counts_tdb.nonempty_domain()[0][1] + 1,
-            self.counts_tdb.nonempty_domain()[1][1] + 1,
-        )
+        # Size the matrix from the requested genes, not the non-empty domain, which ends
+        # at the last gene with any counts and can be smaller than the gene annotation.
+        self.n_gene_cols = int(max(self.gene_indices)) + 1
 
     def __del__(self):
         self.counts_tdb.close()
@@ -178,11 +177,16 @@ class scCollator:
         cell_idx = df.index.tolist()
 
         results = self.counts_tdb.multi_index[cell_idx, :]
+        # one row per cell in the batch rather than one per cell in the whole store
+        batch_cells, batch_rows = np.unique(cell_idx, return_inverse=True)
+        rows = np.searchsorted(batch_cells, results["cell_index"])
+        cols = results["gene_index"]
+        keep = cols < self.n_gene_cols  # counts for genes outside gene_indices are unused
         counts = coo_matrix(
-            (results[self.counts_attr], (results["cell_index"], results["gene_index"])),
-            shape=self.matrix_shape,
+            (results[self.counts_attr][keep], (rows[keep], cols[keep])),
+            shape=(len(batch_cells), self.n_gene_cols),
         ).tocsr()
-        counts = counts[cell_idx, :]
+        counts = counts[batch_rows, :]
         counts = counts[:, self.gene_indices]
 
         X = counts.astype(np.float32)

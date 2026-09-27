@@ -331,6 +331,56 @@ class TestZarrDatasetWrite:
         np.testing.assert_array_almost_equal(X.toarray(), adata.X.toarray())
 
 
+# ── Nullable arrays (anndata "nullable-*" encodings, pandas >= 3 strings) ──
+
+
+class TestNullableAnnotations:
+    """anndata writes nullable arrays, and with pandas >= 3 all strings, as a
+    zarr group of ``values`` and ``mask`` rather than a plain array."""
+
+    @pytest.fixture
+    def nullable_zarr_path(self, tmp_path):
+        obs = pd.DataFrame(
+            {
+                "count": pd.array([1, None, 3], dtype="Int64"),
+                "flag": pd.array([True, None, False], dtype="boolean"),
+            },
+            index=pd.Index(["c0", "c1", "c2"], dtype="string"),
+        )
+        adata = anndata.AnnData(X=csr_matrix(np.eye(3, dtype=np.float32)), obs=obs)
+        p = str(tmp_path / "nullable.zarr")
+        # anndata 0.11 only writes nullable strings when opted in; later versions default to it
+        with anndata.settings.override(allow_write_nullable_strings=True):
+            adata.write_zarr(p)
+        return p
+
+    def test_nullable_index(self, nullable_zarr_path):
+        zd = ZarrDataset(nullable_zarr_path)
+        assert list(zd.obs_index) == ["c0", "c1", "c2"]
+
+    def test_nullable_columns(self, nullable_zarr_path):
+        zd = ZarrDataset(nullable_zarr_path)
+        assert list(zd.get_obs("count")) == [1, None, 3]
+        assert list(zd.get_obs("flag")) == [True, None, False]
+        assert zd.obs.shape == (3, 2)
+
+    def test_set_append_annotation_string_dtype(self, tmp_path):
+        """set_annotation/append_annotation accept pandas extension string arrays."""
+        df = pd.DataFrame(
+            {"name": pd.array(["p", "q"], dtype="string"), "n": [1, 2]},
+            index=pd.Index(["r0", "r1"], dtype="string"),
+        )
+        p = str(tmp_path / "anno.zarr")
+        zd = ZarrDataset(p, mode="w")
+        zd.set_annotation("obs", df)
+        zd.append_annotation("obs", df.set_axis(["r2", "r3"]))
+
+        zd = ZarrDataset(p)
+        assert list(zd.obs_index) == ["r0", "r1", "r2", "r3"]
+        assert list(zd.get_obs("name")) == ["p", "q", "p", "q"]
+        assert list(zd.get_obs("n")) == [1, 2, 1, 2]
+
+
 # ── Dataset processing (from scimilarity_gred) ────────────────────────
 
 

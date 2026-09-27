@@ -875,10 +875,45 @@ class ZarrDataset:
         import pandas as pd
 
         group_index_field = group.attrs["_index"]
-        idx = group[group_index_field][...]
+        idx = self.read_annotation_array(group[group_index_field])
         if pd.api.types.is_object_dtype(idx):
             idx = idx.astype(str)
         return pd.Index(idx)
+
+    @staticmethod
+    def read_annotation_array(node: Union["zarr.Array", "zarr.Group"]) -> "numpy.ndarray":
+        """Read a 1D annotation array, including anndata's nullable array encodings.
+
+        anndata writes nullable arrays as a group holding ``values`` and a boolean
+        ``mask`` of missing entries (encoding-type ``nullable-string-array``,
+        ``nullable-integer`` or ``nullable-boolean``). With pandas >= 3, whose default
+        string dtype is nullable, this includes every string index and column.
+
+        Parameters
+        ----------
+        node: zarr.Array, zarr.Group
+            A zarr array, or a zarr group with a nullable array encoding.
+
+        Returns
+        -------
+        numpy.ndarray
+            The values, as an object array with None for missing entries if any
+            are masked.
+
+        Examples
+        --------
+        >>> zarr_data.read_annotation_array(zarr_data.root["obs"]["_index"])
+        """
+
+        if isinstance(node, zarr.Group) and "values" in node:
+            values = node["values"][...]
+            if "mask" in node:
+                mask = node["mask"][...].astype(bool)
+                if mask.any():
+                    values = values.astype(object)
+                    values[mask] = None
+            return values
+        return node[...]
 
     def get_annotation_column(
         self, group: "zarr.Group", column: str
@@ -908,7 +943,7 @@ class ZarrDataset:
         if column in group:
             series = group[column]
             if isinstance(series, zarr.Group) and "categories" in series:
-                categories = series["categories"][...]
+                categories = self.read_annotation_array(series["categories"])
                 if pd.api.types.is_object_dtype(categories):
                     categories = categories.astype(str)
                 ordered = series.attrs.get("ordered", False)
@@ -928,7 +963,7 @@ class ZarrDataset:
                     series[...], categories, ordered=ordered
                 )
             else:
-                values = series[...]
+                values = self.read_annotation_array(series)
             return values
         return None
 
@@ -947,6 +982,7 @@ class ZarrDataset:
         """
 
         import numcodecs
+        import numpy as np
         import pandas as pd
 
         anno = self.root.create_group(annotation, overwrite=True)
@@ -956,6 +992,9 @@ class ZarrDataset:
         anno.attrs.setdefault("encoding-version", "0.2.0")
 
         def create_array(group, name, data, is_string=False):
+            # pandas >= 3 stores strings in extension arrays (e.g. ArrowStringArray)
+            # that zarr cannot write; convert to numpy object arrays first
+            data = np.asarray(data, dtype=object) if is_string else np.asarray(data)
             if ZARR_V3:
                 if is_string:
                     data = data.astype(str) if data.dtype == object else data
@@ -987,7 +1026,9 @@ class ZarrDataset:
                 anno[k]["codes"].attrs.setdefault("encoding-type", "array")
                 anno[k]["codes"].attrs.setdefault("encoding-version", "0.2.0")
             elif isinstance(df[k], pd.Series):
-                create_array(anno, k, df[k]._values, is_string=(df[k].dtype == "O"))
+                create_array(
+                    anno, k, df[k]._values, is_string=pd.api.types.is_string_dtype(df[k].dtype)
+                )
                 anno[k].attrs.setdefault("encoding-type", "array")
                 anno[k].attrs.setdefault("encoding-version", "0.2.0")
 
